@@ -261,10 +261,16 @@ func (r *reconciler) ensureLoadBalancerService(ci *operatorv1.IngressController,
 		return false, nil, err
 	}
 
+	// BZ2054200: Don't modify/delete services that are not directly owned by this controller
+	ownLBS := isServiceOwnedByIngressController(currentLBService, ci)
+
 	switch {
 	case !wantLBS && !haveLBS:
 		return false, nil, nil
 	case !wantLBS && haveLBS:
+		if !ownLBS {
+			return false, nil, fmt.Errorf("refusing to delete load balancer service not owned by ingress controller: %s", controller.LoadBalancerServiceName(ci))
+		}
 		if deletedFinalizer, err := r.deleteLoadBalancerServiceFinalizer(currentLBService); err != nil {
 			return true, currentLBService, fmt.Errorf("failed to remove finalizer from load balancer service: %v", err)
 		} else if deletedFinalizer {
@@ -283,6 +289,9 @@ func (r *reconciler) ensureLoadBalancerService(ci *operatorv1.IngressController,
 		}
 		return r.currentLoadBalancerService(ci)
 	case wantLBS && haveLBS:
+		if !ownLBS {
+			return false, nil, fmt.Errorf("refusing to update load balancer service not owned by ingress controller: %s", controller.LoadBalancerServiceName(ci))
+		}
 		if deletedFinalizer, err := r.deleteLoadBalancerServiceFinalizer(currentLBService); err != nil {
 			return true, currentLBService, fmt.Errorf("failed to remove finalizer from load balancer service: %v", err)
 		} else if deletedFinalizer {
@@ -310,6 +319,14 @@ func (r *reconciler) ensureLoadBalancerService(ci *operatorv1.IngressController,
 		}
 	}
 	return true, currentLBService, nil
+}
+
+// Determines whether a service is owned by an ingress controller.
+func isServiceOwnedByIngressController(service *corev1.Service, ci *operatorv1.IngressController) bool {
+	if service != nil && service.Labels[manifests.OwningIngressControllerLabel] == ci.Name {
+		return true
+	}
+	return false
 }
 
 // desiredLoadBalancerService returns the desired LB service for a
@@ -526,10 +543,11 @@ func (r *reconciler) normalizeLoadBalancerServiceAnnotations(service *corev1.Ser
 // on existing resources.
 func (r *reconciler) finalizeLoadBalancerService(ci *operatorv1.IngressController) (bool, error) {
 	haveLBS, service, err := r.currentLoadBalancerService(ci)
+	isMyLBS := isServiceOwnedByIngressController(service, ci)
 	if err != nil {
 		return false, err
 	}
-	if !haveLBS {
+	if !haveLBS || !isMyLBS {
 		return false, nil
 	}
 	_, err = r.deleteLoadBalancerServiceFinalizer(service)

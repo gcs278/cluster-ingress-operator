@@ -133,12 +133,12 @@ func TestClusterOperatorStatusRelatedObjects(t *testing.T) {
 		},
 		{
 			Group:     operatorv1.GroupName,
-			Resource:  "IngressController",
+			Resource:  "ingresscontrollers",
 			Namespace: operatorNamespace,
 		},
 		{
 			Group:     iov1.GroupVersion.Group,
-			Resource:  "DNSRecord",
+			Resource:  "dnsrecords",
 			Namespace: operatorNamespace,
 		},
 		{
@@ -2585,7 +2585,7 @@ func TestCustomErrorpages(t *testing.T) {
 	}
 }
 
-// This test validates BZ2054200: Don't delete services that are not directly owned by this controller.
+// TestIngressControllerServiceNameCollision validates BZ2054200: Don't delete services that are not directly owned by this controller.
 // It creates a service with the same naming convention as the ingress controller creates its own load balancing services.
 // Then it triggers a reconcilation of the ingress operator to see if it will delete our service.
 func TestIngressControllerServiceNameCollision(t *testing.T) {
@@ -2936,10 +2936,11 @@ func deleteIngressController(t *testing.T, cl client.Client, ic *operatorv1.Ingr
 	return nil
 }
 
+// assertServiceNotDeleted asserts that a provide service wasn't deleted.
 func assertServiceNotDeleted(t *testing.T, serviceName types.NamespacedName, oldUid types.UID) bool {
 	t.Helper()
 
-	// First Check our LoadBalancer Service
+	// First Check our LoadBalancer Service.
 	service := &corev1.Service{}
 	if err := kclient.Get(context.TODO(), serviceName, service); err != nil {
 		t.Fatalf("expected %s to be present: %v", serviceName, err)

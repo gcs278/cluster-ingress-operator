@@ -2585,6 +2585,144 @@ func TestCustomErrorpages(t *testing.T) {
 	}
 }
 
+// TestTunableRouterKubeletProbesForDefaultIngressController verifies that the
+// operator reverts changes to the kubelet probe parameters for the router
+// deployment associated with the default ingresscontroller.
+//
+// Note: This test mutates the default ingresscontroller.
+func TestTunableRouterKubeletProbesForDefaultIngressController(t *testing.T) {
+	ic := &operatorv1.IngressController{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: defaultName.Namespace,
+			Name:      defaultName.Name,
+		},
+	}
+
+	deploymentName := controller.RouterDeploymentName(ic)
+	deployment := &appsv1.Deployment{}
+	if err := kclient.Get(context.TODO(), deploymentName, deployment); err != nil {
+		t.Fatalf("failed to get default deployment: %v", err)
+	}
+
+	deployment.Spec.Template.Spec.Containers[0].LivenessProbe.TimeoutSeconds = int32(2)
+	deployment.Spec.Template.Spec.Containers[0].LivenessProbe.PeriodSeconds = int32(11)
+	deployment.Spec.Template.Spec.Containers[0].LivenessProbe.FailureThreshold = int32(4)
+	deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.TimeoutSeconds = int32(2)
+	deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.PeriodSeconds = int32(11)
+	deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.SuccessThreshold = int32(2)
+	deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.FailureThreshold = int32(4)
+	deployment.Spec.Template.Spec.Containers[0].StartupProbe.TimeoutSeconds = int32(2)
+	deployment.Spec.Template.Spec.Containers[0].StartupProbe.PeriodSeconds = int32(2)
+	deployment.Spec.Template.Spec.Containers[0].StartupProbe.FailureThreshold = int32(121)
+	if err := kclient.Update(context.TODO(), deployment); err != nil {
+		t.Fatalf("failed to update default deployment: %v", err)
+	}
+
+	if err := wait.PollImmediate(1*time.Second, time.Minute, func() (bool, error) {
+		if err := kclient.Get(context.TODO(), deploymentName, deployment); err != nil {
+			t.Logf("error getting deployment %s: %v", deploymentName, err)
+
+			return false, nil
+		}
+
+		container := deployment.Spec.Template.Spec.Containers[0]
+		ok := true
+		// Verify that all parameters are reset.
+		if e, a := probe(1, 10, 1, 3), container.LivenessProbe; !cmpProbes(e, a) {
+			t.Logf("expected livenessProbe %v, got %v", e, a)
+			ok = false
+		}
+		if e, a := probe(1, 10, 1, 3), container.ReadinessProbe; !cmpProbes(e, a) {
+			t.Logf("expected readinessProbe %v, got %v", e, a)
+			ok = false
+		}
+		if e, a := probe(1, 1, 1, 120), container.StartupProbe; !cmpProbes(e, a) {
+			t.Logf("expected startupProbe %v, got %v", e, a)
+			ok = false
+		}
+
+		if ok {
+			t.Log("observed expected probes")
+		}
+
+		return ok, nil
+	}); err != nil {
+		t.Errorf("failed to observe expected conditions: %v", err)
+	}
+}
+
+// TestTunableRouterKubeletProbesForCustomIngressController verifies that the
+// operator allows changes to the kubelet probe timeouts for the router
+// deployment associated with a custom ingresscontroller.
+func TestTunableRouterKubeletProbesForCustomIngressController(t *testing.T) {
+	icName := types.NamespacedName{
+		Namespace: operatorNamespace,
+		Name:      "tunable-kubelet-probes",
+	}
+	domain := icName.Name + "." + dnsConfig.Spec.BaseDomain
+	ic := newPrivateController(icName, domain)
+	if err := kclient.Create(context.TODO(), ic); err != nil {
+		t.Fatalf("failed to create ingresscontroller %s: %v", icName, err)
+	}
+	defer assertIngressControllerDeleted(t, kclient, ic)
+
+	if err := waitForIngressControllerCondition(t, kclient, 5*time.Minute, icName, availableConditionsForPrivateIngressController...); err != nil {
+		t.Fatalf("failed to observe expected conditions: %v", err)
+	}
+
+	deploymentName := controller.RouterDeploymentName(ic)
+	deployment := &appsv1.Deployment{}
+	if err := kclient.Get(context.TODO(), deploymentName, deployment); err != nil {
+		t.Fatalf("failed to get default deployment: %v", err)
+	}
+
+	deployment.Spec.Template.Spec.Containers[0].LivenessProbe.TimeoutSeconds = int32(2)
+	deployment.Spec.Template.Spec.Containers[0].LivenessProbe.PeriodSeconds = int32(11)
+	deployment.Spec.Template.Spec.Containers[0].LivenessProbe.FailureThreshold = int32(4)
+	deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.TimeoutSeconds = int32(2)
+	deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.PeriodSeconds = int32(11)
+	deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.SuccessThreshold = int32(2)
+	deployment.Spec.Template.Spec.Containers[0].ReadinessProbe.FailureThreshold = int32(4)
+	deployment.Spec.Template.Spec.Containers[0].StartupProbe.TimeoutSeconds = int32(2)
+	deployment.Spec.Template.Spec.Containers[0].StartupProbe.PeriodSeconds = int32(2)
+	deployment.Spec.Template.Spec.Containers[0].StartupProbe.FailureThreshold = int32(121)
+	if err := kclient.Update(context.TODO(), deployment); err != nil {
+		t.Fatalf("failed to update default deployment: %v", err)
+	}
+
+	if err := wait.PollImmediate(1*time.Second, time.Minute, func() (bool, error) {
+		if err := kclient.Get(context.TODO(), deploymentName, deployment); err != nil {
+			t.Logf("error getting deployment %s: %v", deploymentName, err)
+
+			return false, nil
+		}
+
+		container := deployment.Spec.Template.Spec.Containers[0]
+		ok := true
+		// Verify that all parameters *except* timeoutSeconds are reset.
+		if e, a := probe(2, 10, 1, 3), container.LivenessProbe; !cmpProbes(e, a) {
+			t.Logf("expected livenessProbe %v, got %v", e, a)
+			ok = false
+		}
+		if e, a := probe(2, 10, 1, 3), container.ReadinessProbe; !cmpProbes(e, a) {
+			t.Logf("expected readinessProbe %v, got %v", e, a)
+			ok = false
+		}
+		if e, a := probe(2, 1, 1, 120), container.StartupProbe; !cmpProbes(e, a) {
+			t.Logf("expected startupProbe %v, got %v", e, a)
+			ok = false
+		}
+
+		if ok {
+			t.Log("observed expected probes")
+		}
+
+		return ok, nil
+	}); err != nil {
+		t.Errorf("failed to observe expected conditions: %v", err)
+	}
+}
+
 // TestIngressControllerServiceNameCollision validates BZ2054200: Don't delete services that are not directly owned by this controller.
 // It creates a service with the same naming convention as the ingress controller creates its own load balancing services.
 // Then it triggers a reconcilation of the ingress operator to see if it will delete our service.
@@ -2609,32 +2747,33 @@ func TestIngressControllerServiceNameCollision(t *testing.T) {
 	}
 
 	// Create services that could collide with the new ingress controller's naming convention for loadbalancer and nodeport.
-	// TRICKY: Our private ingress controller will reconcile (delete) extra loadBalancerServices, even though it isn't one.
-	echoLoadBalancerServiceName := types.NamespacedName{
+	// TRICKY: Our private ingress controller will reconcile and delete extra loadBalancerServices, even though the
+	//         ingress controller isn't a loadbalancer type itself.
+	conflictingLoadBalancerServiceName := types.NamespacedName{
 		Name:      "router-" + icName.Name,
 		Namespace: "openshift-ingress",
 	}
-	echoLoadBalancerService := buildEchoService(echoLoadBalancerServiceName.Name, echoLoadBalancerServiceName.Namespace, nil)
-	if err := kclient.Create(context.TODO(), echoLoadBalancerService); err != nil {
-		t.Fatalf("failed to create service %s: %v", echoLoadBalancerServiceName, err)
+	conflictingLoadBalancerService := buildEchoService(conflictingLoadBalancerServiceName.Name, conflictingLoadBalancerServiceName.Namespace, nil)
+	if err := kclient.Create(context.TODO(), conflictingLoadBalancerService); err != nil {
+		t.Fatalf("failed to create service %s: %v", conflictingLoadBalancerServiceName, err)
 	}
+	defer func() {
+		if err := kclient.Delete(context.TODO(), conflictingLoadBalancerService); err != nil {
+			t.Fatalf("failed to delete service %s: %v", conflictingLoadBalancerServiceName, err)
+		}
+	}()
 
-	echoNodeportServiceName := types.NamespacedName{
+	conflictingNodeportServiceName := types.NamespacedName{
 		Name:      "router-nodeport-" + icName.Name,
 		Namespace: "openshift-ingress",
 	}
-	echoNodeportService := buildEchoService(echoNodeportServiceName.Name, echoNodeportServiceName.Namespace, nil)
-	if err := kclient.Create(context.TODO(), echoNodeportService); err != nil {
-		t.Fatalf("failed to create service %s: %v", echoNodeportServiceName, err)
+	conflictingNodeportService := buildEchoService(conflictingNodeportServiceName.Name, conflictingNodeportServiceName.Namespace, nil)
+	if err := kclient.Create(context.TODO(), conflictingNodeportService); err != nil {
+		t.Fatalf("failed to create service %s: %v", conflictingNodeportServiceName, err)
 	}
-
-	// Clean up our new services after we are done.
 	defer func() {
-		if err := kclient.Delete(context.TODO(), echoLoadBalancerService); err != nil {
-			t.Fatalf("failed to delete service %s: %v", echoLoadBalancerServiceName, err)
-		}
-		if err := kclient.Delete(context.TODO(), echoNodeportService); err != nil {
-			t.Fatalf("failed to delete service %s: %v", echoNodeportServiceName, err)
+		if err := kclient.Delete(context.TODO(), conflictingNodeportService); err != nil {
+			t.Fatalf("failed to delete service %s: %v", conflictingNodeportServiceName, err)
 		}
 	}()
 
@@ -2655,18 +2794,13 @@ func TestIngressControllerServiceNameCollision(t *testing.T) {
 	}
 
 	// Wait to see if our service gets deleted by the operator due to name collision.
-	oldLoadBalancerUID := echoLoadBalancerService.UID
-	oldNodePortUID := echoNodeportService.UID
+	oldLoadBalancerUID := conflictingLoadBalancerService.UID
+	oldNodePortUID := conflictingNodeportService.UID
 	wait.PollImmediate(1*time.Second, 1*time.Minute, func() (bool, error) {
-		// First Check our LoadBalancer Service.
-		if !assertServiceNotDeleted(t, echoLoadBalancerServiceName, oldLoadBalancerUID) {
-			return true, nil
-		}
-
-		// Then verify our Nodeport Service.
-		if !assertServiceNotDeleted(t, echoNodeportServiceName, oldNodePortUID) {
-			return true, nil
-		}
+		// Check if LoadBalancer and Nodeport Service don't get deleted for the entire duration of this loop.
+		// Will throw fatal error if deleted or marked for deletion and this loop stops.
+		assertServiceNotDeleted(t, conflictingLoadBalancerServiceName, oldLoadBalancerUID)
+		assertServiceNotDeleted(t, conflictingNodeportServiceName, oldNodePortUID)
 
 		return false, nil
 	})
@@ -2937,27 +3071,22 @@ func deleteIngressController(t *testing.T, cl client.Client, ic *operatorv1.Ingr
 }
 
 // assertServiceNotDeleted asserts that a provide service wasn't deleted.
-func assertServiceNotDeleted(t *testing.T, serviceName types.NamespacedName, oldUid types.UID) bool {
+func assertServiceNotDeleted(t *testing.T, serviceName types.NamespacedName, oldUid types.UID) {
 	t.Helper()
 
-	// First Check our LoadBalancer Service.
+	// First check our LoadBalancer Service.
 	service := &corev1.Service{}
 	if err := kclient.Get(context.TODO(), serviceName, service); err != nil {
 		t.Fatalf("expected %s to be present: %v", serviceName, err)
-		return false
 	}
 	// If there is a DeletionTimestamp, it has been marked for deletion.
 	if service.DeletionTimestamp != nil {
 		t.Fatalf("expected service %s to not be marked for deletion: %v", serviceName, service.DeletionTimestamp)
-		return false
 	}
 	// If the UID has changed, then the service has been recreated.
 	if service.UID != oldUid {
 		t.Fatalf("expected service %s to have UID %v, got %v", serviceName, oldUid, service.UID)
-		return false
 	}
-
-	return true
 }
 
 func createDefaultCertTestSecret(cl client.Client, name string) (*corev1.Secret, error) {

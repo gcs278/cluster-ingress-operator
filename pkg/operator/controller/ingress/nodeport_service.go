@@ -52,7 +52,7 @@ func (r *reconciler) ensureNodePortService(ic *operatorv1.IngressController, dep
 		return false, nil, err
 	}
 
-	// BZ2054200: Don't modify/delete services that are not directly owned by this controller
+	// BZ2054200: Don't modify/delete services that are not directly owned by this controller.
 	ownLBS := isServiceOwnedByIngressController(current, ic)
 
 	switch {
@@ -60,7 +60,7 @@ func (r *reconciler) ensureNodePortService(ic *operatorv1.IngressController, dep
 		return false, nil, nil
 	case !wantService && haveService:
 		if !ownLBS {
-			return false, nil, fmt.Errorf("refusing to delete nodeport service not owned by ingress controller: %s", controller.LoadBalancerServiceName(ic))
+			return false, nil, fmt.Errorf("a conflicting nodeport service exists that is not owned by the ingress controller: %s", controller.LoadBalancerServiceName(ic))
 		}
 		if err := r.client.Delete(context.TODO(), current); err != nil {
 			if !errors.IsNotFound(err) {
@@ -78,7 +78,7 @@ func (r *reconciler) ensureNodePortService(ic *operatorv1.IngressController, dep
 		return r.currentNodePortService(ic)
 	case wantService && haveService:
 		if !ownLBS {
-			return false, nil, fmt.Errorf("refusing to update nodeport service not owned by ingress controller: %s", controller.LoadBalancerServiceName(ic))
+			return false, nil, fmt.Errorf("a conflicting nodeport service exists that is not owned by the ingress controller: %s", controller.LoadBalancerServiceName(ic))
 		}
 		if updated, err := r.updateNodePortService(current, desired); err != nil {
 			return true, current, fmt.Errorf("failed to update NodePort service: %v", err)

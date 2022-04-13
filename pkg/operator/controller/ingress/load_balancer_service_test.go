@@ -546,7 +546,7 @@ func TestShouldUseLocalWithFallback(t *testing.T) {
 		actual, err := shouldUseLocalWithFallback(ic, &service)
 		switch {
 		case !tc.expectError && err != nil:
-			t.Errorf("%q: unexpected error: %w", tc.description, err)
+			t.Errorf("%q: unexpected error: %v", tc.description, err)
 		case tc.expectError && err == nil:
 			t.Errorf("%q: expected error, got nil", tc.description)
 		case tc.expect != actual:
@@ -786,7 +786,7 @@ func TestServiceIngressOwner(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		ci := &operatorv1.IngressController{
+		ic := &operatorv1.IngressController{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: tc.ingressName,
 			},
@@ -794,7 +794,7 @@ func TestServiceIngressOwner(t *testing.T) {
 			Status: operatorv1.IngressControllerStatus{},
 		}
 
-		if actual := isServiceOwnedByIngressController(tc.service, ci); actual != tc.expect {
+		if actual := isServiceOwnedByIngressController(tc.service, ic); actual != tc.expect {
 			t.Errorf("expected ownership %t got %t", tc.expect, actual)
 		}
 	}

@@ -334,7 +334,8 @@ func TestSetDefaultPublishingStrategySetsPlatformDefaults(t *testing.T) {
 			if ingressConfig == nil {
 				ingressConfig = &configv1.Ingress{}
 			}
-			if actualResult := setDefaultPublishingStrategy(ic, platformStatus, tc.domainMatchesBaseDomain, ingressConfig); actualResult != true {
+			alreadyAdmitted := false
+			if actualResult := setDefaultPublishingStrategy(ic, platformStatus, tc.domainMatchesBaseDomain, ingressConfig, alreadyAdmitted); actualResult != true {
 				t.Errorf("expected result %v, got %v", true, actualResult)
 			}
 			if diff := cmp.Diff(tc.expectedIC, ic); len(diff) != 0 {
@@ -567,16 +568,16 @@ func TestSetDefaultPublishingStrategyHandlesUpdates(t *testing.T) {
 			name:                    "loadbalancer type changed from NLB to unset, with Classic LB as default",
 			ic:                      makeIC(spec(eps(lbs(operatorv1.ExternalLoadBalancer, &managedDNS))), status(nlb())),
 			ingressConfig:           ingressConfigWithDefaultClassicLB,
-			expectedResult:          true,
-			expectedIC:              makeIC(spec(eps(lbs(operatorv1.ExternalLoadBalancer, &managedDNS))), status(elbWithNullParameters())),
+			expectedResult:          false,
+			expectedIC:              makeIC(spec(eps(lbs(operatorv1.ExternalLoadBalancer, &managedDNS))), status(nlb())),
 			domainMatchesBaseDomain: true,
 		},
 		{
 			name:                    "loadbalancer type changed from Classic LB to unset, with NLB as default",
 			ic:                      makeIC(spec(eps(lbs(operatorv1.ExternalLoadBalancer, &managedDNS))), status(elb())),
 			ingressConfig:           ingressConfigWithDefaultNLB,
-			expectedResult:          true,
-			expectedIC:              makeIC(spec(eps(lbs(operatorv1.ExternalLoadBalancer, &managedDNS))), status(nlb())),
+			expectedResult:          false,
+			expectedIC:              makeIC(spec(eps(lbs(operatorv1.ExternalLoadBalancer, &managedDNS))), status(elb())),
 			domainMatchesBaseDomain: true,
 		},
 		{
@@ -783,7 +784,7 @@ func TestSetDefaultPublishingStrategyHandlesUpdates(t *testing.T) {
 			ic:                      makeIC(spec(nil), status(nil)),
 			ingressConfig:           ingressConfigWithDefaultClassicLB,
 			expectedResult:          true,
-			expectedIC:              makeIC(spec(nil), status(elbWithNullParameters())),
+			expectedIC:              makeIC(spec(nil), status(eps(lbs(operatorv1.ExternalLoadBalancer, &managedDNS)))),
 			domainMatchesBaseDomain: true,
 		},
 		{
@@ -791,7 +792,7 @@ func TestSetDefaultPublishingStrategyHandlesUpdates(t *testing.T) {
 			ic:                      makeIC(spec(nil), status(nil)),
 			ingressConfig:           ingressConfigWithDefaultNLB,
 			expectedResult:          true,
-			expectedIC:              makeIC(spec(nil), status(nlb())),
+			expectedIC:              makeIC(spec(nil), status(eps(lbs(operatorv1.ExternalLoadBalancer, &managedDNS)))),
 			domainMatchesBaseDomain: true,
 		},
 	}
@@ -805,7 +806,8 @@ func TestSetDefaultPublishingStrategyHandlesUpdates(t *testing.T) {
 			if ingressConfig == nil {
 				ingressConfig = &configv1.Ingress{}
 			}
-			if actualResult := setDefaultPublishingStrategy(ic, platformStatus, tc.domainMatchesBaseDomain, ingressConfig); actualResult != tc.expectedResult {
+			alreadyAdmitted := true
+			if actualResult := setDefaultPublishingStrategy(ic, platformStatus, tc.domainMatchesBaseDomain, ingressConfig, alreadyAdmitted); actualResult != tc.expectedResult {
 				t.Errorf("expected result %v, got %v", tc.expectedResult, actualResult)
 			}
 			if diff := cmp.Diff(tc.expectedIC, ic); len(diff) != 0 {

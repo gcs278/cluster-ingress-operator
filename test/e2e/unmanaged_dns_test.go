@@ -72,7 +72,6 @@ func TestUnmanagedDNSToManagedDNSIngressController(t *testing.T) {
 
 	testNamespace := types.NamespacedName{Name: name.Name + "-initial", Namespace: name.Namespace}
 	verifyExternalIngressController(t, testNamespace, "apps."+ic.Spec.Domain, wildcardRecord.Spec.Targets[0])
-
 	t.Logf("Updating ingresscontroller %s to dnsManagementPolicy=Managed", ic.Name)
 
 	if err := updateIngressControllerWithRetryOnConflict(t, name, 5*time.Minute, func(ic *operatorv1.IngressController) {

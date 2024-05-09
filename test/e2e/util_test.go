@@ -983,9 +983,9 @@ func isFeatureGateEnabled(featureGateName configv1.FeatureGateName) (bool, error
 // getClusterVersion returns the ClusterVersion if found.  If one is not found, it returns an error.
 func getClusterVersion() (*configv1.ClusterVersion, error) {
 	clusterVersion := &configv1.ClusterVersion{}
-	versionName := types.NamespacedName{"", "version"}
-	err := wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
-		if err := kclient.Get(context.TODO(), versionName, clusterVersion); err != nil {
+	versionName := types.NamespacedName{Name: "version"}
+	err := wait.PollUntilContextTimeout(context.TODO(), 1*time.Second, 1*time.Minute, false, func(ctx context.Context) (bool, error) {
+		if err := kclient.Get(ctx, versionName, clusterVersion); err != nil {
 			return false, nil
 		}
 		return true, nil

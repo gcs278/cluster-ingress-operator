@@ -401,34 +401,31 @@ func desiredLoadBalancerService(ci *operatorv1.IngressController, deploymentRef 
 			if proxyNeeded {
 				service.Annotations[awsLBProxyProtocolAnnotation] = "*"
 			}
-			if lb != nil && lb.ProviderParameters != nil {
-				if aws := lb.ProviderParameters.AWS; aws != nil && lb.ProviderParameters.Type == operatorv1.AWSLoadBalancerProvider {
-					switch aws.Type {
-					case operatorv1.AWSNetworkLoadBalancer:
-						service.Annotations[AWSLBTypeAnnotation] = AWSNLBAnnotation
-						// NLBs require a different health check interval than CLBs.
-						// See <https://bugzilla.redhat.com/show_bug.cgi?id=1908758>.
-						service.Annotations[awsLBHealthCheckIntervalAnnotation] = awsLBHealthCheckIntervalNLB
+			switch desiredAWSLoadBalancerType(ci) {
+			case operatorv1.AWSNetworkLoadBalancer:
+				service.Annotations[AWSLBTypeAnnotation] = AWSNLBAnnotation
+				// NLBs require a different health check interval than CLBs.
+				// See <https://bugzilla.redhat.com/show_bug.cgi?id=1908758>.
+				service.Annotations[awsLBHealthCheckIntervalAnnotation] = awsLBHealthCheckIntervalNLB
 
-						if subnetsAWSEnabled {
-							nlbParams := getAWSNetworkLoadBalancerParametersInSpec(ci)
-							if nlbParams != nil && awsSubnetsExist(nlbParams.Subnets) {
-								service.Annotations[awsLBSubnetsAnnotation] = JoinAWSSubnets(nlbParams.Subnets, ",")
-							}
-						}
-					case operatorv1.AWSClassicLoadBalancer:
-						if aws.ClassicLoadBalancerParameters != nil {
-							if v := aws.ClassicLoadBalancerParameters.ConnectionIdleTimeout; v.Duration > 0 {
-								service.Annotations[awsELBConnectionIdleTimeoutAnnotation] = strconv.FormatUint(uint64(v.Round(time.Second).Seconds()), 10)
-							}
-						}
+				if subnetsAWSEnabled {
+					nlbParamsSpec := getAWSNetworkLoadBalancerParametersInSpec(ci)
+					if nlbParamsSpec != nil && awsSubnetsExist(nlbParamsSpec.Subnets) {
+						service.Annotations[awsLBSubnetsAnnotation] = JoinAWSSubnets(nlbParamsSpec.Subnets, ",")
+					}
+				}
+			case operatorv1.AWSClassicLoadBalancer:
+				clbParamsStatus := getAWSClassicLoadBalancerParametersInStatus(ci)
+				if clbParamsStatus != nil {
+					if v := clbParamsStatus.ConnectionIdleTimeout; v.Duration > 0 {
+						service.Annotations[awsELBConnectionIdleTimeoutAnnotation] = strconv.FormatUint(uint64(v.Round(time.Second).Seconds()), 10)
+					}
+				}
 
-						if subnetsAWSEnabled {
-							clbParams := getAWSClassicLoadBalancerParametersInSpec(ci)
-							if clbParams != nil && awsSubnetsExist(clbParams.Subnets) {
-								service.Annotations[awsLBSubnetsAnnotation] = JoinAWSSubnets(clbParams.Subnets, ",")
-							}
-						}
+				if subnetsAWSEnabled {
+					clbParamsSpec := getAWSClassicLoadBalancerParametersInSpec(ci)
+					if clbParamsSpec != nil && awsSubnetsExist(clbParamsSpec.Subnets) {
+						service.Annotations[awsLBSubnetsAnnotation] = JoinAWSSubnets(clbParamsSpec.Subnets, ",")
 					}
 				}
 			}
@@ -599,6 +596,17 @@ func (r *reconciler) updateLoadBalancerService(current, desired *corev1.Service,
 		return true, nil
 	}
 
+	// Don't update the service if BOTH the AWS LB type and subnet annotations change.
+	// Subnets are specific to LB type, so when LB type is changed, we MUST use the
+	// subnets associated with the new LB type, which may result in a change.
+	// This special case must be handled since we don't automatically effectuate subnet changes.
+	if platform.Type == configv1.AWSPlatformType &&
+		current.Annotations[AWSLBTypeAnnotation] != desired.Annotations[AWSLBTypeAnnotation] &&
+		!serviceSubnetsEqual(current, desired) {
+		log.Info("the service LB type and subnets have both changed, refusing to update the service, the service must be deleted or the changes reverted", "namespace", current.Namespace, "name", current.Name)
+		return false, nil
+	}
+
 	changed, updated := loadBalancerServiceChanged(current, desired)
 	if !changed {
 		return false, nil
@@ -660,16 +668,7 @@ func loadBalancerServiceChanged(current, expected *corev1.Service) (bool, *corev
 	// avoid problems, make sure the previous release blocks upgrades when
 	// the user has modified an annotation or spec field that the new
 	// release manages.
-	//
-	// Make subnet annotation managed ONLY when LB type annotation changes.
-	// Ordinarily, the subnet annotation is not managed, so they are not immediately effectuated.
-	// However, since subnets are specific to LB type, when LB type is changed, we MUST use the
-	// subnets associated with the appropriate LB type.
-	managedAnnotationsUpdated := managedLoadBalancerServiceAnnotations
-	if current.Annotations[AWSLBTypeAnnotation] != expected.Annotations[AWSLBTypeAnnotation] {
-		managedAnnotationsUpdated = managedLoadBalancerServiceAnnotations.Union(sets.NewString(awsLBSubnetsAnnotation))
-	}
-	changed, updated := loadBalancerServiceAnnotationsChanged(current, expected, managedAnnotationsUpdated)
+	changed, updated := loadBalancerServiceAnnotationsChanged(current, expected, managedLoadBalancerServiceAnnotations)
 
 	// If spec.loadBalancerSourceRanges is nonempty on the service, that
 	// means that allowedSourceRanges is nonempty on the ingresscontroller,
@@ -796,26 +795,32 @@ func loadBalancerServiceIsProgressing(ic *operatorv1.IngressController, service 
 
 	if platform.Type == configv1.AWSPlatformType && subnetsAWSEnabled {
 		var (
-			wantSubnets, haveSubnets *operatorv1.AWSSubnets
-			paramsFieldName          string
+			wantSubnets, haveSubnets   *operatorv1.AWSSubnets
+			haveSubnetsParamsFieldName string
 		)
-		switch getAWSLoadBalancerTypeInStatus(ic) {
+		// Get the desired subnets, i.e. the spec.
+		switch desiredAWSLoadBalancerType(ic) {
 		case operatorv1.AWSNetworkLoadBalancer:
 			if nlbParams := getAWSNetworkLoadBalancerParametersInSpec(ic); nlbParams != nil {
 				wantSubnets = nlbParams.Subnets
 			}
-			if nlbParams := getAWSNetworkLoadBalancerParametersInStatus(ic); nlbParams != nil {
-				haveSubnets = nlbParams.Subnets
-			}
-			paramsFieldName = "networkLoadBalancer"
+			haveSubnetsParamsFieldName = "networkLoadBalancer"
 		case operatorv1.AWSClassicLoadBalancer:
 			if clbParams := getAWSClassicLoadBalancerParametersInSpec(ic); clbParams != nil {
 				wantSubnets = clbParams.Subnets
 			}
+			haveSubnetsParamsFieldName = "classicLoadBalancer"
+		}
+		// Get the current subnets, i.e. the status.
+		switch currentAWSLoadBalancerType(ic) {
+		case operatorv1.AWSNetworkLoadBalancer:
+			if nlbParams := getAWSNetworkLoadBalancerParametersInStatus(ic); nlbParams != nil {
+				haveSubnets = nlbParams.Subnets
+			}
+		case operatorv1.AWSClassicLoadBalancer:
 			if clbParams := getAWSClassicLoadBalancerParametersInStatus(ic); clbParams != nil {
 				haveSubnets = clbParams.Subnets
 			}
-			paramsFieldName = "classicLoadBalancer"
 		}
 		if !awsSubnetsEqual(wantSubnets, haveSubnets) {
 			// Generate JSON for the oc patch command as well as "pretty" json
@@ -824,7 +829,7 @@ func loadBalancerServiceIsProgressing(ic *operatorv1.IngressController, service 
 			haveSubnetsPrettyJson := convertAWSSubnetListToPatchJson(haveSubnets, "{}", "[]")
 			wantSubnetsPrettyJson := convertAWSSubnetListToPatchJson(wantSubnets, "{}", "[]")
 			changedMsg := fmt.Sprintf("The IngressController subnets were changed from %q to %q.", haveSubnetsPrettyJson, wantSubnetsPrettyJson)
-			ocPatchRevertCmd := fmt.Sprintf("oc -n openshift-ingress-operator patch ingresscontrollers/%[1]s --type=merge --patch='{\"spec\":{\"endpointPublishingStrategy\":{\"type\":\"LoadBalancerService\",\"loadBalancer\":{\"providerParameters\":{\"type\":\"AWS\",\"aws\":{\"type\":\"%[2]s\",\"%[3]s\":{\"subnets\":%[4]s}}}}}}}'", ic.Name, getAWSLoadBalancerTypeInStatus(ic), paramsFieldName, haveSubnetsPatchJson)
+			ocPatchRevertCmd := fmt.Sprintf("oc -n openshift-ingress-operator patch ingresscontrollers/%[1]s --type=merge --patch='{\"spec\":{\"endpointPublishingStrategy\":{\"type\":\"LoadBalancerService\",\"loadBalancer\":{\"providerParameters\":{\"type\":\"AWS\",\"aws\":{\"type\":\"%[2]s\",\"%[3]s\":{\"subnets\":%[4]s}}}}}}}'", ic.Name, getLBTypeFromServiceAnnotation(service), haveSubnetsParamsFieldName, haveSubnetsPatchJson)
 			err := fmt.Errorf("%[1]s  To effectuate this change, you must delete the service: `oc -n %[2]s delete svc/%[3]s`; the service load-balancer will then be deprovisioned and a new one created. This will most likely cause the new load-balancer to have a different host name and IP address and cause disruption. To return to the previous state, you can revert the change to the IngressController: `%[4]s`", changedMsg, service.Namespace, service.Name, ocPatchRevertCmd)
 			errs = append(errs, err)
 		}
@@ -930,11 +935,11 @@ func getSubnetsFromServiceAnnotation(service *corev1.Service) *operatorv1.AWSSub
 	}
 
 	awsSubnets := &operatorv1.AWSSubnets{}
-	if a, ok := service.Annotations[awsLBSubnetsAnnotation]; ok {
+	if val, ok := service.Annotations[awsLBSubnetsAnnotation]; ok {
 		var subnets []string
-		a = strings.TrimSpace(a)
-		if len(a) > 0 {
-			subnets = strings.Split(a, ",")
+		val = strings.TrimSpace(val)
+		if len(val) > 0 {
+			subnets = strings.Split(val, ",")
 		}
 
 		// Cast the slice of strings to AWSSubnets object while distinguishing between subnet IDs and Names.
@@ -953,6 +958,20 @@ func getSubnetsFromServiceAnnotation(service *corev1.Service) *operatorv1.AWSSub
 	}
 
 	return awsSubnets
+}
+
+// getLBTypeFromServiceAnnotation gets the effective LB Type by looking at the
+// service.beta.kubernetes.io/aws-load-balancer-type annotation of the LoadBalancer-type Service.
+func getLBTypeFromServiceAnnotation(service *corev1.Service) operatorv1.AWSLoadBalancerType {
+	if service == nil {
+		return ""
+	}
+
+	if val, ok := service.Annotations[AWSLBTypeAnnotation]; ok && val == AWSNLBAnnotation {
+		return operatorv1.AWSNetworkLoadBalancer
+	} else {
+		return operatorv1.AWSClassicLoadBalancer
+	}
 }
 
 // serviceSubnetsEqual compares the subnet annotations on two services to determine if they are equivalent,
@@ -1045,15 +1064,46 @@ func JoinAWSSubnets(subnets *operatorv1.AWSSubnets, sep string) string {
 	return joinedSubnets
 }
 
-// getAWSLoadBalancerTypeInStatus gets the AWS Load Balancer Type reported in the status.
-func getAWSLoadBalancerTypeInStatus(ic *operatorv1.IngressController) operatorv1.AWSLoadBalancerType {
-	if ic.Status.EndpointPublishingStrategy != nil &&
-		ic.Status.EndpointPublishingStrategy.LoadBalancer != nil &&
-		ic.Status.EndpointPublishingStrategy.LoadBalancer.ProviderParameters != nil &&
-		ic.Status.EndpointPublishingStrategy.LoadBalancer.ProviderParameters.AWS != nil {
-		return ic.Status.EndpointPublishingStrategy.LoadBalancer.ProviderParameters.AWS.Type
+// currentAWSLoadBalancerType gets the current AWS Load Balancer Type. If Type isn't defined
+// in the status, it returns the assumed default of CLB. If AWS isn't configured as the provider,
+// return an empty string.
+func currentAWSLoadBalancerType(ic *operatorv1.IngressController) operatorv1.AWSLoadBalancerType {
+	if ic.Status.EndpointPublishingStrategy == nil ||
+		ic.Status.EndpointPublishingStrategy.LoadBalancer == nil ||
+		ic.Status.EndpointPublishingStrategy.LoadBalancer.ProviderParameters == nil ||
+		ic.Status.EndpointPublishingStrategy.LoadBalancer.ProviderParameters.AWS == nil {
+		// If no AWS provider parameters are set, CLB is the default
+		return operatorv1.AWSClassicLoadBalancer
 	}
-	return ""
+
+	// Ignore any configuration by returning empty string if AWS is not the provider type.
+	if ic.Status.EndpointPublishingStrategy.LoadBalancer.ProviderParameters.Type != operatorv1.AWSLoadBalancerProvider {
+		return ""
+	}
+
+	// Return the LB Type if configured.
+	return ic.Status.EndpointPublishingStrategy.LoadBalancer.ProviderParameters.AWS.Type
+}
+
+// desiredAWSLoadBalancerType gets the desired AWS Load Balancer Type. If Type isn't defined
+// in the spec, it returns the assumed default of CLB. If AWS isn't configured as the provider,
+// return an empty string.
+func desiredAWSLoadBalancerType(ic *operatorv1.IngressController) operatorv1.AWSLoadBalancerType {
+	if ic.Spec.EndpointPublishingStrategy == nil ||
+		ic.Spec.EndpointPublishingStrategy.LoadBalancer == nil ||
+		ic.Spec.EndpointPublishingStrategy.LoadBalancer.ProviderParameters == nil ||
+		ic.Spec.EndpointPublishingStrategy.LoadBalancer.ProviderParameters.AWS == nil {
+		// If no AWS provider parameters are set, CLB is the default
+		return operatorv1.AWSClassicLoadBalancer
+	}
+
+	// Ignore any configuration by returning empty string if AWS is not the provider type.
+	if ic.Spec.EndpointPublishingStrategy.LoadBalancer.ProviderParameters.Type != operatorv1.AWSLoadBalancerProvider {
+		return ""
+	}
+
+	// Return the LB Type if configured.
+	return ic.Spec.EndpointPublishingStrategy.LoadBalancer.ProviderParameters.AWS.Type
 }
 
 // getAWSClassicLoadBalancerParametersInSpec gets the ClassicLoadBalancerParameter struct

@@ -19,7 +19,6 @@ import (
 	"github.com/openshift/cluster-ingress-operator/pkg/operator/controller/ingress"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -137,9 +136,7 @@ func TestAWSLBSubnets(t *testing.T) {
 
 	// Delete the LB-type Service to effectuate the subnet update.
 	t.Logf("deleting the service to effectuate the subnets: %s/%s", lbService.Namespace, lbService.Name)
-	foreground := metav1.DeletePropagationForeground
-	deleteOptions := client.DeleteOptions{PropagationPolicy: &foreground}
-	if err = kclient.Delete(context.Background(), lbService, &deleteOptions); err != nil {
+	if err = kclient.Delete(context.Background(), lbService); err != nil {
 		t.Fatalf("failed to delete lb service: %v", err)
 	}
 
@@ -173,8 +170,19 @@ func TestAWSLBSubnets(t *testing.T) {
 		t.Fatalf("failed to update ingresscontroller: %v", err)
 	}
 
-	// When changing load balancer type which results in different subnets, the subnets are effectuated immediately.
-	// There's no need to delete the service.
+	// Wait for the LoadBalancerProgressing to become True, which represents the message telling
+	// the cluster admin to delete the service to effectuate the subnets.
+	if err = waitForIngressControllerCondition(t, kclient, 5*time.Minute, icName, loadBalancerProgressingTrue); err != nil {
+		t.Fatalf("failed to observe expected conditions: %v", err)
+	}
+
+	// Delete the LB-type Service to effectuate the subnet update.
+	t.Logf("deleting the service to effectuate the subnets: %s/%s", lbService.Namespace, lbService.Name)
+	if err = kclient.Delete(context.Background(), lbService); err != nil {
+		t.Fatalf("failed to delete lb service: %v", err)
+	}
+
+	// Ensure the service's load-balancer status changes, and verify we get the expected subnet annotation on the service.
 	if err = waitForLBSubnetAnnotation(t, ic, publicSubnets); err != nil {
 		t.Fatalf("failed to wait for expected subnet annotation on service: %v", err)
 	}

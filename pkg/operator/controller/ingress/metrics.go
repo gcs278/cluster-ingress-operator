@@ -80,12 +80,7 @@ func DeleteActiveNLBMetrics(ic *operatorv1.IngressController) {
 
 func SetIngressControllerNLBMetric(ci *operatorv1.IngressController) {
 	labelVal := 0
-	if ci.Status.EndpointPublishingStrategy != nil &&
-		ci.Status.EndpointPublishingStrategy.LoadBalancer != nil &&
-		ci.Status.EndpointPublishingStrategy.LoadBalancer.ProviderParameters != nil &&
-		ci.Status.EndpointPublishingStrategy.LoadBalancer.ProviderParameters.Type == operatorv1.AWSLoadBalancerProvider &&
-		ci.Status.EndpointPublishingStrategy.LoadBalancer.ProviderParameters.AWS != nil &&
-		ci.Status.EndpointPublishingStrategy.LoadBalancer.ProviderParameters.AWS.Type == operatorv1.AWSNetworkLoadBalancer {
+	if currentAWSLoadBalancerType(ci) == operatorv1.AWSNetworkLoadBalancer {
 		labelVal = 1
 	}
 	activeNLBs.WithLabelValues(ci.Name).Set(float64(labelVal))

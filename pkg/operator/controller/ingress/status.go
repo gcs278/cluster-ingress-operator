@@ -67,15 +67,18 @@ func (r *reconciler) syncIngressControllerStatus(ic *operatorv1.IngressControlle
 	var errs []error
 
 	updated := ic.DeepCopy()
+	if platformStatus.Type == configv1.AWSPlatformType {
+		// Set the AWS LB Type in the status to the *actual* LB Type found on the service.
+		updated.Status.EndpointPublishingStrategy.LoadBalancer.ProviderParameters.AWS.Type = getLBTypeFromServiceAnnotation(service)
+		if r.config.IngressControllerLBSubnetsAWSEnabled {
+			updateIngressControllerAWSSubnetStatus(updated, service)
+		}
+	}
 	updated.Status.AvailableReplicas = deployment.Status.AvailableReplicas
 	updated.Status.Selector = selector.String()
 	updated.Status.TLSProfile = computeIngressTLSProfile(ic.Status.TLSProfile, deployment)
-
 	if updated.Status.EndpointPublishingStrategy != nil && updated.Status.EndpointPublishingStrategy.LoadBalancer != nil {
 		updated.Status.EndpointPublishingStrategy.LoadBalancer.AllowedSourceRanges = computeAllowedSourceRanges(service)
-	}
-	if platformStatus.Type == configv1.AWSPlatformType && r.config.IngressControllerLBSubnetsAWSEnabled {
-		updateIngressControllerAWSSubnetStatus(updated, service)
 	}
 
 	updated.Status.Conditions = MergeConditions(updated.Status.Conditions, computeDeploymentAvailableCondition(deployment))
@@ -948,7 +951,7 @@ func updateIngressControllerAWSSubnetStatus(ic *operatorv1.IngressController, se
 	// as NLBs and CLBs have separate subnet configuration fields.
 	clbParams := getAWSClassicLoadBalancerParametersInStatus(ic)
 	nlbParams := getAWSNetworkLoadBalancerParametersInStatus(ic)
-	switch getAWSLoadBalancerTypeInStatus(ic) {
+	switch currentAWSLoadBalancerType(ic) {
 	case operatorv1.AWSNetworkLoadBalancer:
 		// NetworkLoadBalancerParameters should be initialized by setDefaultPublishingStrategy
 		// when an IngressController is admitted, so we don't need to initialize here.

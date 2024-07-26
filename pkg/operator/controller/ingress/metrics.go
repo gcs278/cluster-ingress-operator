@@ -80,6 +80,7 @@ func DeleteActiveNLBMetrics(ic *operatorv1.IngressController) {
 
 func SetIngressControllerNLBMetric(ci *operatorv1.IngressController) {
 	labelVal := 0
+	// TODO: This would need to change too
 	if ci.Status.EndpointPublishingStrategy != nil &&
 		ci.Status.EndpointPublishingStrategy.LoadBalancer != nil &&
 		ci.Status.EndpointPublishingStrategy.LoadBalancer.ProviderParameters != nil &&

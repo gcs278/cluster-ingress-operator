@@ -129,18 +129,24 @@ func TestAWSLBSubnets(t *testing.T) {
 		t.Fatalf("failed to observe expected conditions: %v", err)
 	}
 
-	t.Logf("recreating the service to effectuate the subnets: %s/%s", controller.LoadBalancerServiceName(ic).Namespace, controller.LoadBalancerServiceName(ic).Namespace)
-	if err = recreateIngressControllerService(t, ic); err != nil {
-		t.Fatalf("failed to delete and recreate service: %v", err)
+	lbService := &corev1.Service{}
+	if err = kclient.Get(context.Background(), controller.LoadBalancerServiceName(ic), lbService); err != nil {
+		t.Fatalf("failed to get lb service: %v", err)
+	}
+
+	// Delete the LB-type Service to effectuate the subnet update.
+	t.Logf("deleting the service to effectuate the subnets: %s/%s", lbService.Namespace, lbService.Name)
+	if err = kclient.Delete(context.Background(), lbService); err != nil {
+		t.Fatalf("failed to delete lb service: %v", err)
 	}
 
 	// Ensure the service's load-balancer status changes, and verify we get the expected subnet annotation on the service.
-	if err = waitForLBSubnetAnnotation(t, ic, invalidSubnets); err != nil {
+	if err := waitForLBSubnetAnnotation(t, ic, invalidSubnets); err != nil {
 		t.Fatalf("failed to wait for expected subnet annotation on service: %v", err)
 	}
 
 	// Verify the subnets status field is configured to what we expect.
-	if err = verifyIngressControllerSubnetStatus(t, icName); err != nil {
+	if err := verifyIngressControllerSubnetStatus(t, icName); err != nil {
 		t.Fatalf("failed to verify ingresscontroller subnet status: %v", err)
 	}
 
@@ -149,7 +155,7 @@ func TestAWSLBSubnets(t *testing.T) {
 		Type:   operatorv1.LoadBalancerReadyIngressConditionType,
 		Status: operatorv1.ConditionFalse,
 	}
-	if err = waitForIngressControllerCondition(t, kclient, 5*time.Minute, icName, loadBalancerReadyFalse); err != nil {
+	if err := waitForIngressControllerCondition(t, kclient, 5*time.Minute, icName, loadBalancerReadyFalse); err != nil {
 		t.Fatalf("failed to observe expected conditions: %v", err)
 	}
 
@@ -164,8 +170,19 @@ func TestAWSLBSubnets(t *testing.T) {
 		t.Fatalf("failed to update ingresscontroller: %v", err)
 	}
 
-	// When changing load balancer type which results in different subnets, the subnets are effectuated immediately.
-	// There's no need to delete the service.
+	// Wait for the LoadBalancerProgressing to become True, which represents the message telling
+	// the cluster admin to delete the service to effectuate the subnets.
+	if err = waitForIngressControllerCondition(t, kclient, 5*time.Minute, icName, loadBalancerProgressingTrue); err != nil {
+		t.Fatalf("failed to observe expected conditions: %v", err)
+	}
+
+	// Delete the LB-type Service to effectuate the subnet update.
+	t.Logf("deleting the service to effectuate the subnets: %s/%s", lbService.Namespace, lbService.Name)
+	if err = kclient.Delete(context.Background(), lbService); err != nil {
+		t.Fatalf("failed to delete lb service: %v", err)
+	}
+
+	// Ensure the service's load-balancer status changes, and verify we get the expected subnet annotation on the service.
 	if err = waitForLBSubnetAnnotation(t, ic, publicSubnets); err != nil {
 		t.Fatalf("failed to wait for expected subnet annotation on service: %v", err)
 	}
@@ -309,35 +326,6 @@ func verifyIngressControllerSubnetStatus(t *testing.T, icName types.NamespacedNa
 		return fmt.Errorf("error verifying subnet status for IngressController %q: %v", icName.Name, err)
 	}
 	return nil
-}
-
-// recreateIngressControllerService deletes the service for the IngressController and waits for it
-// to be recreated by the Ingress Operator.
-func recreateIngressControllerService(t *testing.T, ic *operatorv1.IngressController) error {
-	lbService := &corev1.Service{}
-	serviceName := controller.LoadBalancerServiceName(ic)
-	if err := kclient.Get(context.Background(), serviceName, lbService); err != nil {
-		return fmt.Errorf("failed to get service: %v", err)
-	}
-	oldUid := lbService.UID
-
-	if err := kclient.Delete(context.Background(), lbService); err != nil {
-		return fmt.Errorf("failed to delete service: %v", err)
-	}
-
-	// Wait for the service to be recreated by Ingress Operator.
-	err := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 3*time.Minute, false, func(ctx context.Context) (bool, error) {
-		if err := kclient.Get(context.Background(), controller.LoadBalancerServiceName(ic), lbService); err != nil {
-			t.Logf("failed to get service %s/%s: %v, retrying ...", serviceName.Namespace, serviceName.Namespace, err)
-			return false, nil
-		}
-		if oldUid == lbService.UID {
-			t.Logf("service %s/%s UID has not changed yet, retrying...", serviceName.Namespace, serviceName.Namespace)
-			return false, nil
-		}
-		return true, nil
-	})
-	return err
 }
 
 // classicLoadBalancerParametersSpecExist checks if ClassicLoadBalancerParameters exist in the IngressController spec.

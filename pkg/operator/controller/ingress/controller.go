@@ -1173,7 +1173,7 @@ func IsStatusDomainSet(ingress *operatorv1.IngressController) bool {
 	return true
 }
 
-// IsProxyProtocolNeeded checks whether proxy protocol is needed based
+// IsProxyProtocolNeeded checks whether proxy protocol is needed to be based
 // upon the given ic and platform.
 func IsProxyProtocolNeeded(ic *operatorv1.IngressController, platform *configv1.PlatformStatus) (bool, error) {
 	if platform == nil {
@@ -1182,14 +1182,10 @@ func IsProxyProtocolNeeded(ic *operatorv1.IngressController, platform *configv1.
 	}
 	switch ic.Status.EndpointPublishingStrategy.Type {
 	case operatorv1.LoadBalancerServiceStrategyType:
-		// This can really be done for for any external [cloud] LBs that support the proxy protocol.
+		// This can really be done for any external [cloud] LBs that support the proxy protocol.
 		switch platform.Type {
 		case configv1.AWSPlatformType:
-			if ic.Status.EndpointPublishingStrategy.LoadBalancer == nil ||
-				ic.Status.EndpointPublishingStrategy.LoadBalancer.ProviderParameters == nil ||
-				ic.Status.EndpointPublishingStrategy.LoadBalancer.ProviderParameters.AWS == nil ||
-				ic.Status.EndpointPublishingStrategy.LoadBalancer.ProviderParameters.Type == operatorv1.AWSLoadBalancerProvider &&
-					ic.Status.EndpointPublishingStrategy.LoadBalancer.ProviderParameters.AWS.Type == operatorv1.AWSClassicLoadBalancer {
+			if desiredAWSLoadBalancerType(ic) == operatorv1.AWSClassicLoadBalancer {
 				return true, nil
 			}
 		case configv1.IBMCloudPlatformType:

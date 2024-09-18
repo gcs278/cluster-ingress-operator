@@ -3117,7 +3117,7 @@ func Test_computeIngressUpgradeableCondition(t *testing.T) {
 					},
 				},
 			}
-			wantSvc, service, err := desiredLoadBalancerService(ic, deploymentRef, platformStatus, true, true)
+			wantSvc, service, err := desiredLoadBalancerService(ic, deploymentRef, platformStatus, true, true, true)
 			if err != nil {
 				t.Errorf("unexpected error from desiredLoadBalancerService: %v", err)
 				return
@@ -3227,7 +3227,7 @@ func Test_computeIngressEvaluationConditionsDetectedCondition(t *testing.T) {
 				},
 			}
 
-			wantSvc, service, err := desiredLoadBalancerService(ic, deploymentRef, platformStatus, true, true)
+			wantSvc, service, err := desiredLoadBalancerService(ic, deploymentRef, platformStatus, true, true, true)
 			if err != nil {
 				t.Fatalf("unexpected error from desiredLoadBalancerService: %v", err)
 			}

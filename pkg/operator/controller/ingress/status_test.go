@@ -2234,6 +2234,44 @@ func Test_IngressStatusesEqual(t *testing.T) {
 				[]operatorv1.EIPAllocation{"eipalloc-yyyyyyyyyyyyyyyyy", "eipalloc-xxxxxxxxxxxxxxxxx"},
 			),
 		},
+		{
+			description: "classicLoadBalancer parameters cleared",
+			expected:    false,
+			a: icStatusWithSubnetsOrEIPAllocations(
+				operatorv1.AWSClassicLoadBalancer,
+				nil,
+				[]operatorv1.EIPAllocation{"eipalloc-xxxxxxxxxxxxxxxxx"},
+			),
+			b: operatorv1.IngressControllerStatus{
+				EndpointPublishingStrategy: &operatorv1.EndpointPublishingStrategy{
+					Type: operatorv1.LoadBalancerServiceStrategyType,
+					LoadBalancer: &operatorv1.LoadBalancerStrategy{
+						ProviderParameters: &operatorv1.ProviderLoadBalancerParameters{
+							AWS: &operatorv1.AWSLoadBalancerParameters{},
+						},
+					},
+				},
+			},
+		},
+		{
+			description: "networkLoadBalancer parameters cleared",
+			expected:    false,
+			a: icStatusWithSubnetsOrEIPAllocations(
+				operatorv1.AWSNetworkLoadBalancer,
+				nil,
+				[]operatorv1.EIPAllocation{"eipalloc-xxxxxxxxxxxxxxxxx"},
+			),
+			b: operatorv1.IngressControllerStatus{
+				EndpointPublishingStrategy: &operatorv1.EndpointPublishingStrategy{
+					Type: operatorv1.LoadBalancerServiceStrategyType,
+					LoadBalancer: &operatorv1.LoadBalancerStrategy{
+						ProviderParameters: &operatorv1.ProviderLoadBalancerParameters{
+							AWS: &operatorv1.AWSLoadBalancerParameters{},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range testCases {

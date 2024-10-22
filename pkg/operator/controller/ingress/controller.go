@@ -462,8 +462,10 @@ func setDefaultPublishingStrategy(ic *operatorv1.IngressController, platformStat
 			}
 		}
 
-		// Set provider parameters based on the cluster ingress config.
-		setDefaultProviderParameters(effectiveStrategy.LoadBalancer, ingressConfig, alreadyAdmitted)
+		// Set provider parameters based on the cluster ingress config if not already admitted.
+		if !alreadyAdmitted {
+			setDefaultProviderParameters(effectiveStrategy.LoadBalancer, ingressConfig)
+		}
 
 	case operatorv1.NodePortServiceStrategyType:
 		if effectiveStrategy.NodePort == nil {
@@ -543,7 +545,7 @@ func setDefaultPublishingStrategy(ic *operatorv1.IngressController, platformStat
 				if statusLB.ProviderParameters.AWS == nil {
 					statusLB.ProviderParameters.AWS = &operatorv1.AWSLoadBalancerParameters{}
 				}
-				if specLB.ProviderParameters.AWS.Type != statusLB.ProviderParameters.AWS.Type {
+				if specLB.ProviderParameters.AWS != nil && specLB.ProviderParameters.AWS.Type != statusLB.ProviderParameters.AWS.Type {
 					statusLB.ProviderParameters.AWS.Type = specLB.ProviderParameters.AWS.Type
 					changed = true
 				}
@@ -578,8 +580,10 @@ func setDefaultPublishingStrategy(ic *operatorv1.IngressController, platformStat
 			case operatorv1.GCPLoadBalancerProvider:
 				// The only provider parameter that is supported
 				// for GCP is the ClientAccess parameter.
-				var statusClientAccess operatorv1.GCPClientAccess
-				specClientAccess := specLB.ProviderParameters.GCP.ClientAccess
+				var specClientAccess, statusClientAccess operatorv1.GCPClientAccess
+				if specLB.ProviderParameters.GCP != nil {
+					specClientAccess = specLB.ProviderParameters.GCP.ClientAccess
+				}
 				if statusLB.ProviderParameters != nil && statusLB.ProviderParameters.GCP != nil {
 					statusClientAccess = statusLB.ProviderParameters.GCP.ClientAccess
 				}
@@ -599,8 +603,10 @@ func setDefaultPublishingStrategy(ic *operatorv1.IngressController, platformStat
 			case operatorv1.IBMLoadBalancerProvider:
 				// The only provider parameter that is supported
 				// for IBM is the Protocol parameter.
-				var statusProtocol operatorv1.IngressControllerProtocol
-				specProtocol := specLB.ProviderParameters.IBM.Protocol
+				var specProtocol, statusProtocol operatorv1.IngressControllerProtocol
+				if specLB.ProviderParameters.IBM != nil {
+					specProtocol = specLB.ProviderParameters.IBM.Protocol
+				}
 				if statusLB.ProviderParameters != nil && statusLB.ProviderParameters.IBM != nil {
 					statusProtocol = statusLB.ProviderParameters.IBM.Protocol
 				}
@@ -681,12 +687,12 @@ func setDefaultPublishingStrategy(ic *operatorv1.IngressController, platformStat
 // setDefaultProviderParameters mutates the given LoadBalancerStrategy by
 // defaulting its ProviderParameters field based on the defaults in the provided
 // ingress config object.
-func setDefaultProviderParameters(lbs *operatorv1.LoadBalancerStrategy, ingressConfig *configv1.Ingress, alreadyAdmitted bool) {
+func setDefaultProviderParameters(lbs *operatorv1.LoadBalancerStrategy, ingressConfig *configv1.Ingress) {
 	var provider operatorv1.LoadBalancerProviderType
 	if lbs.ProviderParameters != nil {
 		provider = lbs.ProviderParameters.Type
 	}
-	if len(provider) == 0 && !alreadyAdmitted {
+	if len(provider) == 0 {
 		// Infer the LB type from the cluster ingress config, but only
 		// if the ingresscontroller isn't already admitted.
 		switch ingressConfig.Spec.LoadBalancer.Platform.Type {
@@ -701,7 +707,7 @@ func setDefaultProviderParameters(lbs *operatorv1.LoadBalancerStrategy, ingressC
 		}
 		lbs.ProviderParameters.Type = provider
 		defaultLBType := operatorv1.AWSClassicLoadBalancer
-		if p := ingressConfig.Spec.LoadBalancer.Platform; !alreadyAdmitted && p.Type == configv1.AWSPlatformType && p.AWS != nil {
+		if p := ingressConfig.Spec.LoadBalancer.Platform; p.Type == configv1.AWSPlatformType && p.AWS != nil {
 			if p.AWS.Type == configv1.NLB {
 				defaultLBType = operatorv1.AWSNetworkLoadBalancer
 			}

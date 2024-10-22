@@ -543,7 +543,7 @@ func setDefaultPublishingStrategy(ic *operatorv1.IngressController, platformStat
 				if statusLB.ProviderParameters.AWS == nil {
 					statusLB.ProviderParameters.AWS = &operatorv1.AWSLoadBalancerParameters{}
 				}
-				if specLB.ProviderParameters.AWS.Type != statusLB.ProviderParameters.AWS.Type {
+				if specLB.ProviderParameters.AWS.Type != "" && specLB.ProviderParameters.AWS.Type != statusLB.ProviderParameters.AWS.Type {
 					statusLB.ProviderParameters.AWS.Type = specLB.ProviderParameters.AWS.Type
 					changed = true
 				}
@@ -701,7 +701,7 @@ func setDefaultProviderParameters(lbs *operatorv1.LoadBalancerStrategy, ingressC
 		}
 		lbs.ProviderParameters.Type = provider
 		defaultLBType := operatorv1.AWSClassicLoadBalancer
-		if p := ingressConfig.Spec.LoadBalancer.Platform; !alreadyAdmitted && p.Type == configv1.AWSPlatformType && p.AWS != nil {
+		if p := ingressConfig.Spec.LoadBalancer.Platform; p.Type == configv1.AWSPlatformType && p.AWS != nil {
 			if p.AWS.Type == configv1.NLB {
 				defaultLBType = operatorv1.AWSNetworkLoadBalancer
 			}
@@ -709,7 +709,7 @@ func setDefaultProviderParameters(lbs *operatorv1.LoadBalancerStrategy, ingressC
 		if lbs.ProviderParameters.AWS == nil {
 			lbs.ProviderParameters.AWS = &operatorv1.AWSLoadBalancerParameters{}
 		}
-		if len(lbs.ProviderParameters.AWS.Type) == 0 {
+		if len(lbs.ProviderParameters.AWS.Type) == 0 && !alreadyAdmitted {
 			lbs.ProviderParameters.AWS.Type = defaultLBType
 		}
 		switch lbs.ProviderParameters.AWS.Type {

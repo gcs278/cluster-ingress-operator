@@ -31,6 +31,7 @@ require (
 	github.com/istio-ecosystem/sail-operator v0.0.0-20250513111011-30be83268d6b
 	github.com/openshift/api v0.0.0-20260707235947-32c3490d4ec2
 	github.com/openshift/client-go v0.0.0-20260317180604-743f664b82d1
+	github.com/openshift/controller-runtime-common v0.0.0-20260428152732-64ee174f5e2e
 	github.com/openshift/library-go v0.0.0-20260318142011-72bf34f474bc
 	github.com/operator-framework/api v0.30.0
 	github.com/pkg/errors v0.9.1
@@ -178,7 +179,6 @@ require (
 	github.com/oklog/ulid v1.3.1 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
-	github.com/openshift/controller-runtime-common v0.0.0-20260428152732-64ee174f5e2e // indirect
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect

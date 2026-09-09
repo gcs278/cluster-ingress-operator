@@ -15,8 +15,12 @@ import (
 	configv1 "github.com/openshift/api/config/v1"
 	operatorcontroller "github.com/openshift/cluster-ingress-operator/pkg/operator/controller"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
+	"github.com/go-logr/zapr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	networkingv1 "k8s.io/api/networking/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -1121,6 +1125,16 @@ func Test_Reconcile(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			coreLog, recorded := observer.New(zapcore.InfoLevel)
+			testZap := zap.New(coreLog)
+
+			origLogger := log
+			t.Cleanup(func() {
+				log = origLogger
+			})
+
+			log = zapr.NewLogger(testZap).WithName("operator")
+
 			fakeClient := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithStatusSubresource(tc.existingObjects...).

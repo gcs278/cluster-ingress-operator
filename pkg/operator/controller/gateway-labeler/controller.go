@@ -179,7 +179,7 @@ func NewUnmanaged(mgr manager.Manager, modeAccessor *operatorcontroller.GatewayA
 	// because the Ingress CRD only exists on TechPreview/DevPreview clusters.
 	if modeAccessor != nil && modeAccessor.GateEnabled() {
 		ingressToGateways := operatorcontroller.IngressWakeUpMapper(reconciler.cache, func() client.ObjectList { return &gatewayapiv1.GatewayList{} })
-		if err := c.Watch(source.Kind[client.Object](mgr.GetCache(), &operatorv1alpha1.Ingress{}, handler.EnqueueRequestsFromMapFunc(ingressToGateways))); err != nil {
+		if err := c.Watch(source.Kind[client.Object](mgr.GetCache(), &operatorv1alpha1.Ingress{}, handler.EnqueueRequestsFromMapFunc(ingressToGateways), operatorcontroller.GatewayAPIModeChangePredicate())); err != nil {
 			return nil, err
 		}
 	}

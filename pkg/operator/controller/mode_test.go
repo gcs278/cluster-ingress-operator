@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	operatorv1alpha1 "github.com/openshift/api/operator/v1alpha1"
 	"github.com/stretchr/testify/assert"
@@ -257,6 +258,28 @@ func TestModeAccessor_TransitionState(t *testing.T) {
 	state = m.GetTransitionState()
 	assert.False(t, state.InProgress)
 	assert.Nil(t, state.Error)
+}
+
+func TestModeAccessor_TransitionStateNotification(t *testing.T) {
+	m := NewGatewayAPIModeAccessor(true)
+	events := m.TransitionEvents()
+
+	m.SetTransitionState(TransitionState{
+		InProgress: true,
+		Target:     operatorv1alpha1.GatewayAPIManagementModeUnmanaged,
+	})
+	select {
+	case <-events:
+	case <-time.After(time.Second):
+		t.Fatal("expected transition start to notify the status controller")
+	}
+
+	m.SetTransitionState(TransitionState{})
+	select {
+	case <-events:
+	case <-time.After(time.Second):
+		t.Fatal("expected transition completion to notify the status controller")
+	}
 }
 
 func TestModeAccessor_ConcurrentAccess(t *testing.T) {

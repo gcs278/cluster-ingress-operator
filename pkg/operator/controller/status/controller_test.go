@@ -1,6 +1,7 @@
 package status
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -15,7 +16,73 @@ import (
 	operatorcontroller "github.com/openshift/cluster-ingress-operator/pkg/operator/controller"
 	"github.com/openshift/cluster-ingress-operator/pkg/operator/controller/ingress"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
+
+type fakeGatewayAPIIngressWatchController struct {
+	controller.Controller
+	watchCalls int
+}
+
+func (f *fakeGatewayAPIIngressWatchController) Watch(_ source.TypedSource[reconcile.Request]) error {
+	f.watchCalls++
+	return nil
+}
+
+func TestRegisterGatewayAPIIngressWatch(t *testing.T) {
+	toDefaultIngressController := func(context.Context, client.Object) []reconcile.Request { return nil }
+
+	t.Run("gate disabled does not watch", func(t *testing.T) {
+		c := &fakeGatewayAPIIngressWatchController{}
+		err := registerGatewayAPIIngressWatch(c, nil, Config{ModeAccessor: operatorcontroller.NewGatewayAPIModeAccessor(false)}, toDefaultIngressController)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.watchCalls != 0 {
+			t.Fatalf("expected no watch when the management-mode gate is disabled, got %d", c.watchCalls)
+		}
+	})
+
+	t.Run("gate enabled watches cluster ingress", func(t *testing.T) {
+		c := &fakeGatewayAPIIngressWatchController{}
+		err := registerGatewayAPIIngressWatch(c, nil, Config{ModeAccessor: operatorcontroller.NewGatewayAPIModeAccessor(true)}, toDefaultIngressController)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.watchCalls != 1 {
+			t.Fatalf("expected one watch when the management-mode gate is enabled, got %d", c.watchCalls)
+		}
+	})
+}
+
+func TestRegisterGatewayAPIModeTransitionWatch(t *testing.T) {
+	toDefaultIngressController := func(context.Context, client.Object) []reconcile.Request { return nil }
+
+	t.Run("gate disabled does not watch", func(t *testing.T) {
+		c := &fakeGatewayAPIIngressWatchController{}
+		err := registerGatewayAPIModeTransitionWatch(c, Config{ModeAccessor: operatorcontroller.NewGatewayAPIModeAccessor(false)}, toDefaultIngressController)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.watchCalls != 0 {
+			t.Fatalf("expected no transition watch when the management-mode gate is disabled, got %d", c.watchCalls)
+		}
+	})
+
+	t.Run("gate enabled watches transition events", func(t *testing.T) {
+		c := &fakeGatewayAPIIngressWatchController{}
+		err := registerGatewayAPIModeTransitionWatch(c, Config{ModeAccessor: operatorcontroller.NewGatewayAPIModeAccessor(true)}, toDefaultIngressController)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.watchCalls != 1 {
+			t.Fatalf("expected one transition watch when the management-mode gate is enabled, got %d", c.watchCalls)
+		}
+	})
+}
 
 func Test_computeOperatorProgressingCondition(t *testing.T) {
 	type versions struct {

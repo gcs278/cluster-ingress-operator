@@ -857,6 +857,35 @@ func TestEnsureAdmissionPolicy(t *testing.T) {
 		assert.Len(t, updatedVAP.Spec.Validations, 2,
 			"updated VAP must include pod-bound validation for HA")
 	})
+
+	t.Run("does not mutate resources still managed by CVO", func(t *testing.T) {
+		existingVAP := baseAdmissionPolicy.DeepCopy()
+		existingVAP.Annotations = map[string]string{cvoFeatureSetAnnotation: "Default"}
+		existingBinding := desiredAdmissionPolicyBinding.DeepCopy()
+		existingBinding.Annotations = map[string]string{cvoFeatureSetAnnotation: "Default"}
+		infraObj := &configv1.Infrastructure{
+			ObjectMeta: metav1.ObjectMeta{Name: "cluster"},
+			Status: configv1.InfrastructureStatus{
+				ControlPlaneTopology: configv1.HighlyAvailableTopologyMode,
+			},
+		}
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithRuntimeObjects(existingVAP, existingBinding, infraObj).
+			Build()
+		cl := &testutil.FakeClientRecorder{
+			Client:  fakeClient,
+			T:       t,
+			Added:   []client.Object{},
+			Updated: []client.Object{},
+			Deleted: []client.Object{},
+		}
+		r := &reconciler{client: cl}
+		err := r.ensureAdmissionPolicy(context.Background())
+		assert.NoError(t, err)
+		assert.Empty(t, cl.Added)
+		assert.Empty(t, cl.Updated)
+	})
 }
 
 // TestDeleteAdmissionPolicy verifies the delete path removes both VAP
@@ -897,6 +926,28 @@ func TestDeleteAdmissionPolicy(t *testing.T) {
 		r := &reconciler{client: cl}
 		err := r.deleteAdmissionPolicy(context.Background())
 		assert.NoError(t, err, "must succeed when resources are already absent")
+	})
+
+	t.Run("does not delete resources still managed by CVO", func(t *testing.T) {
+		existingVAP := baseAdmissionPolicy.DeepCopy()
+		existingVAP.Annotations = map[string]string{cvoFeatureSetAnnotation: "Default"}
+		existingBinding := desiredAdmissionPolicyBinding.DeepCopy()
+		existingBinding.Annotations = map[string]string{cvoFeatureSetAnnotation: "Default"}
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithRuntimeObjects(existingVAP, existingBinding).
+			Build()
+		cl := &testutil.FakeClientRecorder{
+			Client:  fakeClient,
+			T:       t,
+			Added:   []client.Object{},
+			Updated: []client.Object{},
+			Deleted: []client.Object{},
+		}
+		r := &reconciler{client: cl}
+		err := r.deleteAdmissionPolicy(context.Background())
+		assert.ErrorIs(t, err, errCVOManagedAdmissionPolicy)
+		assert.Empty(t, cl.Deleted)
 	})
 }
 

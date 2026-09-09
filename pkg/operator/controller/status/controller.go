@@ -17,6 +17,7 @@ import (
 
 	configv1 "github.com/openshift/api/config/v1"
 	operatorv1 "github.com/openshift/api/operator/v1"
+	operatorv1alpha1 "github.com/openshift/api/operator/v1alpha1"
 	iov1 "github.com/openshift/api/operatoringress/v1"
 
 	logf "github.com/openshift/cluster-ingress-operator/pkg/log"
@@ -163,6 +164,12 @@ func New(mgr manager.Manager, config Config) (controller.Controller, error) {
 	)); err != nil {
 		return nil, err
 	}
+	if err := registerGatewayAPIIngressWatch(c, operatorCache, config, toDefaultIngressController); err != nil {
+		return nil, err
+	}
+	if err := registerGatewayAPIModeTransitionWatch(c, config, toDefaultIngressController); err != nil {
+		return nil, err
+	}
 
 	// If the "GatewayAPI" and "GatewayAPIController" featuregates are
 	// enabled, watch subscriptions so that this controller can update
@@ -217,6 +224,37 @@ func New(mgr manager.Manager, config Config) (controller.Controller, error) {
 	}
 
 	return c, nil
+}
+
+// registerGatewayAPIIngressWatch watches the operator Ingress singleton so
+// status reconciliation observes Gateway API management-mode changes and the
+// gatewayapi controller's status updates. The watch must remain gated because
+// the Ingress CRD is absent when GatewayAPIManagementMode is disabled.
+func registerGatewayAPIIngressWatch(c controller.Controller, operatorCache cache.Cache, config Config, toDefaultIngressController handler.MapFunc) error {
+	if config.ModeAccessor == nil || !config.ModeAccessor.GateEnabled() {
+		return nil
+	}
+	isClusterIngress := predicate.NewPredicateFuncs(func(o client.Object) bool {
+		return o.GetName() == "cluster"
+	})
+	if err := c.Watch(source.Kind[client.Object](operatorCache, &operatorv1alpha1.Ingress{}, handler.EnqueueRequestsFromMapFunc(toDefaultIngressController), isClusterIngress)); err != nil {
+		return fmt.Errorf("failed to watch operator Ingress resource: %w", err)
+	}
+	return nil
+}
+
+// registerGatewayAPIModeTransitionWatch wakes the status controller whenever
+// the gatewayapi controller changes the in-memory transition state. It is
+// gated because ModeAccessor only carries management-mode transitions when the
+// GatewayAPIManagementMode feature gate is enabled.
+func registerGatewayAPIModeTransitionWatch(c controller.Controller, config Config, toDefaultIngressController handler.MapFunc) error {
+	if config.ModeAccessor == nil || !config.ModeAccessor.GateEnabled() {
+		return nil
+	}
+	if err := c.Watch(source.Channel(config.ModeAccessor.TransitionEvents(), handler.EnqueueRequestsFromMapFunc(toDefaultIngressController))); err != nil {
+		return fmt.Errorf("failed to watch Gateway API management-mode transitions: %w", err)
+	}
+	return nil
 }
 
 // Config holds all the things necessary for the controller to run.
@@ -936,8 +974,7 @@ func computeOperatorProgressingCondition(ingresscontrollers []operatorv1.Ingress
 	// Check for an in-progress Gateway API management mode transition. A
 	// failed transition operation (e.g., VAP delete, Sail uninstall) keeps
 	// reporting Progressing rather than Degraded, since it is retried on
-	// subsequent reconciles; see ingress_controller_gateway_api_mode_transition_failed
-	// for the durable failure signal.
+	// subsequent reconciles.
 	if modeTransition.InProgress {
 		msg := fmt.Sprintf("Transitioning Gateway API management mode to %s", modeTransition.Target)
 		if modeTransition.Error != nil {

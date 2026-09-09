@@ -32,13 +32,16 @@ const (
 	reasonVersionMismatch          = "VersionMismatch"
 )
 
-// reconcileIngressStatus computes CRD management conditions, updates
-// the mode accessor, and writes conditions back to the Ingress status.
+// reconcileIngressStatus computes CRD management conditions and updates the
+// mode accessor. When updateStatus is true, it also writes the conditions back
+// to the Ingress status. The gatewayapi reconciler computes the state before
+// mutating Managed-mode resources, then persists it only after those mutations
+// succeed so that status is a durable record of a completed transition.
 //
 // The snapshot parameter carries the single authoritative Ingress CR
 // read for this reconcile pass, preventing TOCTOU divergence between
 // this function and reconcileAdmissionPolicyTransition.
-func (r *reconciler) reconcileIngressStatus(ctx context.Context, snapshot ingressModeSnapshot) error {
+func (r *reconciler) reconcileIngressStatus(ctx context.Context, snapshot ingressModeSnapshot, updateStatus bool) error {
 	presentCond, compliantCond, anyExistingNonCompliant, err := r.computeCRDConditions(ctx)
 	if err != nil {
 		return err
@@ -75,12 +78,41 @@ func (r *reconciler) reconcileIngressStatus(ctx context.Context, snapshot ingres
 
 	r.config.ModeAccessor.Update(snapshot.desiredMode, managed, present, compliant)
 
-	updateManagementModeMetrics(managedCond)
-
-	if !snapshot.found {
+	if !updateStatus || !snapshot.found {
 		return nil
 	}
+
+	updateManagementModeMetrics(managedCond)
 	return r.updateIngressStatus(ctx, snapshot.ingress, []metav1.Condition{managedCond, presentCond, compliantCond})
+}
+
+// appliedModeFromIngressStatus returns the desired mode when the current
+// Ingress status is a terminal record for that mode and generation. It lets a
+// freshly started operator distinguish an already-completed transition from a
+// new request without relying on process-local state.
+func appliedModeFromIngressStatus(snapshot ingressModeSnapshot) (operatorv1alpha1.GatewayAPIManagementMode, bool) {
+	if !snapshot.found || snapshot.ingress == nil || snapshot.ingress.Status.ObservedGeneration != snapshot.ingress.Generation {
+		return "", false
+	}
+
+	managed := apimeta.FindStatusCondition(snapshot.ingress.Status.Conditions, conditionTypeGatewayAPICRDsManaged)
+	if managed == nil {
+		return "", false
+	}
+
+	switch snapshot.desiredMode {
+	case operatorv1alpha1.GatewayAPIManagementModeUnmanaged:
+		return snapshot.desiredMode, managed.Status == metav1.ConditionFalse && managed.Reason == reasonUnmanaged
+	case operatorv1alpha1.GatewayAPIManagementModeManaged:
+		present := apimeta.FindStatusCondition(snapshot.ingress.Status.Conditions, conditionTypeGatewayAPICRDsPresent)
+		compliant := apimeta.FindStatusCondition(snapshot.ingress.Status.Conditions, conditionTypeGatewayAPICRDsCompliant)
+		return snapshot.desiredMode,
+			managed.Status == metav1.ConditionTrue && managed.Reason == reasonManagedByIngressOperator &&
+				present != nil && present.Status == metav1.ConditionTrue &&
+				compliant != nil && compliant.Status == metav1.ConditionTrue
+	default:
+		return "", false
+	}
 }
 
 // computeCRDConditions inspects the live CRDs on the cluster and

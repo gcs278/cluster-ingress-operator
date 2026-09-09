@@ -9,8 +9,6 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-
-	operatorcontroller "github.com/openshift/cluster-ingress-operator/pkg/operator/controller"
 )
 
 var (
@@ -23,16 +21,6 @@ var (
 		Name: "ingress_controller_gateway_api_management_mode",
 		Help: "Reports the effective Gateway API management mode. 1 for the effective mode, 0 for the other.",
 	}, []string{"mode"})
-
-	// gatewayAPIModeTransitionFailedMetric reports 1 for the target mode a
-	// transition is currently failing to reach; it is labeled by the
-	// target mode so scrapes can tell which direction is stuck. The
-	// metric is removed entirely once the transition completes
-	// successfully, so a failure never lingers as a stale time series.
-	gatewayAPIModeTransitionFailedMetric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "ingress_controller_gateway_api_mode_transition_failed",
-		Help: "Reports 1 for the target Gateway API management mode a transition is currently failing to reach. Removed once the transition succeeds.",
-	}, []string{"target"})
 
 	// gatewayAPIUnmanagedCRDsMetric reports 1 for each Gateway API-group
 	// CRD found on the cluster that CIO does not manage (e.g., a
@@ -48,18 +36,8 @@ var (
 
 	gatewayAPIMetricsList = []prometheus.Collector{
 		gatewayAPIManagementModeMetric,
-		gatewayAPIModeTransitionFailedMetric,
 		gatewayAPIUnmanagedCRDsMetric,
 	}
-
-	// modeTransitionFailedMetricMu protects lastFailingTarget, used to
-	// avoid a blanket Reset() on every reconcile. A full Reset() briefly
-	// empties the entire metric family, which a concurrent Prometheus
-	// scrape could observe as "no failure" even though one is ongoing;
-	// deleting only the specific stale label combination avoids that gap
-	// on the common repeated-failure path.
-	modeTransitionFailedMetricMu sync.Mutex
-	lastFailingTarget            string
 
 	// unmanagedCRDsMetricMu protects lastUnmanagedCRDNames, used the same
 	// way as lastFailingTarget above: only the CRD names that actually
@@ -95,33 +73,6 @@ func updateManagementModeMetrics(managedCond metav1.Condition) {
 		gatewayAPIManagementModeMetric.WithLabelValues("Managed").Set(0)
 		gatewayAPIManagementModeMetric.WithLabelValues("Unmanaged").Set(1)
 	}
-}
-
-// updateModeTransitionFailedMetric reports a Gateway API management mode
-// transition failure. It is called every time the gatewayapi controller
-// records a TransitionState so the metric never drifts from the
-// Progressing condition computed by the status controller.
-//
-// Only the stale label combination is deleted (rather than calling
-// Reset() on every call), so a failure that repeats across retries -
-// the common case, since this runs on every failing reconcile - never
-// causes the metric family to go briefly empty.
-func updateModeTransitionFailedMetric(state operatorcontroller.TransitionState) {
-	failingTarget := ""
-	if state.InProgress && state.Error != nil {
-		failingTarget = string(state.Target)
-	}
-
-	modeTransitionFailedMetricMu.Lock()
-	defer modeTransitionFailedMetricMu.Unlock()
-
-	if lastFailingTarget != "" && lastFailingTarget != failingTarget {
-		gatewayAPIModeTransitionFailedMetric.DeleteLabelValues(lastFailingTarget)
-	}
-	if failingTarget != "" {
-		gatewayAPIModeTransitionFailedMetric.WithLabelValues(failingTarget).Set(1)
-	}
-	lastFailingTarget = failingTarget
 }
 
 // updateUnmanagedCRDsMetric reports the set of Gateway API-group CRDs that

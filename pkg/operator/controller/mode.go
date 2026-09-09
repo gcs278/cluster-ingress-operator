@@ -8,9 +8,12 @@ import (
 
 	logf "github.com/openshift/cluster-ingress-operator/pkg/log"
 
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -62,6 +65,52 @@ func IngressWakeUpMapper(cacheReader client.Reader, listFactory func() client.Ob
 	}
 }
 
+// GatewayAPIModeChangePredicate filters Ingress wake-up events for dependent
+// Gateway API controllers. A wake-up is needed only when the effective
+// management mode or one of the three Gateway API readiness conditions
+// changes; other Ingress updates must not enqueue every dependent resource.
+func GatewayAPIModeChangePredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc:  func(event.CreateEvent) bool { return true },
+		DeleteFunc:  func(event.DeleteEvent) bool { return true },
+		GenericFunc: func(event.GenericEvent) bool { return false },
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldIngress, oldOK := e.ObjectOld.(*operatorv1alpha1.Ingress)
+			newIngress, newOK := e.ObjectNew.(*operatorv1alpha1.Ingress)
+			if !oldOK || !newOK {
+				return false
+			}
+			if effectiveGatewayAPIMode(oldIngress) != effectiveGatewayAPIMode(newIngress) {
+				return true
+			}
+			return gatewayAPIConditionsChanged(oldIngress.Status.Conditions, newIngress.Status.Conditions)
+		},
+	}
+}
+
+func effectiveGatewayAPIMode(ingress *operatorv1alpha1.Ingress) operatorv1alpha1.GatewayAPIManagementMode {
+	mode := ingress.Spec.GatewayAPI.ManagementMode
+	if mode == "" {
+		return operatorv1alpha1.GatewayAPIManagementModeManaged
+	}
+	return mode
+}
+
+func gatewayAPIConditionsChanged(oldConditions, newConditions []metav1.Condition) bool {
+	for _, conditionType := range []string{
+		"GatewayAPICRDsManaged",
+		"GatewayAPICRDsPresent",
+		"GatewayAPICRDsCompliant",
+	} {
+		oldCondition := meta.FindStatusCondition(oldConditions, conditionType)
+		newCondition := meta.FindStatusCondition(newConditions, conditionType)
+		if !apiequality.Semantic.DeepEqual(oldCondition, newCondition) {
+			return true
+		}
+	}
+	return false
+}
+
 // TransitionState describes the progress of a Gateway API management
 // mode transition. The gatewayapi controller sets this state and the
 // status controller reads it to compute ClusterOperator Progressing
@@ -97,6 +146,10 @@ type GatewayAPIModeAccessor struct {
 	crdsEstablished bool
 
 	transition TransitionState
+	// transitionEvents wakes the status controller when transition state
+	// changes. Its single-item buffer coalesces rapid updates and ensures the
+	// gatewayapi reconciler never blocks on status reconciliation.
+	transitionEvents chan event.GenericEvent
 
 	// lastAppliedMode tracks the mode that was last successfully
 	// reconciled to completion. nil means no reconcile has completed
@@ -111,7 +164,8 @@ type GatewayAPIModeAccessor struct {
 // Ingress CR.
 func NewGatewayAPIModeAccessor(gateEnabled bool) *GatewayAPIModeAccessor {
 	return &GatewayAPIModeAccessor{
-		gateEnabled: gateEnabled,
+		gateEnabled:      gateEnabled,
+		transitionEvents: make(chan event.GenericEvent, 1),
 	}
 }
 
@@ -192,8 +246,21 @@ func (m *GatewayAPIModeAccessor) BlockDependents() {
 // compute ClusterOperator Progressing and Degraded conditions.
 func (m *GatewayAPIModeAccessor) SetTransitionState(state TransitionState) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.transition = state
+	m.mu.Unlock()
+
+	select {
+	case m.transitionEvents <- event.GenericEvent{Object: &operatorv1alpha1.Ingress{}}:
+	default:
+	}
+}
+
+// TransitionEvents returns a channel that receives a coalesced notification
+// whenever the Gateway API management-mode transition state changes. The
+// status controller consumes these events to update ClusterOperator status
+// without periodic polling.
+func (m *GatewayAPIModeAccessor) TransitionEvents() <-chan event.GenericEvent {
+	return m.transitionEvents
 }
 
 // GetTransitionState returns the current mode transition state. It is

@@ -2,6 +2,7 @@ package gatewayapi
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"reflect"
 
@@ -11,7 +12,7 @@ import (
 	operatorv1alpha1 "github.com/openshift/api/operator/v1alpha1"
 
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -23,7 +24,11 @@ var (
 	// is not External.
 	baseAdmissionPolicy           = manifests.GatewayAPICRDAdmissionPolicy()
 	desiredAdmissionPolicyBinding = manifests.GatewayAPICRDAdmissionPolicyBinding()
+
+	errCVOManagedAdmissionPolicy = stderrors.New("ValidatingAdmissionPolicy is still managed by CVO")
 )
+
+const cvoFeatureSetAnnotation = "release.openshift.io/feature-set"
 
 // desiredAdmissionPolicyForTopology returns the desired
 // ValidatingAdmissionPolicy for the given control-plane topology
@@ -75,6 +80,9 @@ func (r *reconciler) reconcileAdmissionPolicyTransition(ctx context.Context, sna
 
 	// Step 2: Remove the ValidatingAdmissionPolicy and binding.
 	if err := r.deleteAdmissionPolicy(ctx); err != nil {
+		if isCVOManagedAdmissionPolicy(err) {
+			return err
+		}
 		return fmt.Errorf("cannot complete transition to Unmanaged: %w", err)
 	}
 	return nil
@@ -88,6 +96,14 @@ func (r *reconciler) reconcileAdmissionPolicyTransition(ctx context.Context, sna
 // SA-only base. Any failure to read Infrastructure fails the reconcile
 // to prevent silently weakening the admission policy.
 func (r *reconciler) ensureAdmissionPolicy(ctx context.Context) error {
+	cvoManaged, err := r.cvoManagesAdmissionPolicy(ctx)
+	if err != nil {
+		return err
+	}
+	if cvoManaged {
+		return nil
+	}
+
 	infra := &configv1.Infrastructure{}
 	if err := r.client.Get(ctx, types.NamespacedName{Name: "cluster"}, infra); err != nil {
 		return fmt.Errorf("failed to get Infrastructure/cluster for admission policy topology: %w", err)
@@ -107,7 +123,7 @@ func (r *reconciler) ensureValidatingAdmissionPolicy(ctx context.Context, desire
 
 	var current admissionregistrationv1.ValidatingAdmissionPolicy
 	if err := r.client.Get(ctx, name, &current); err != nil {
-		if !errors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("failed to get ValidatingAdmissionPolicy %s: %w", desired.Name, err)
 		}
 		if err := r.client.Create(ctx, desired); err != nil {
@@ -136,7 +152,7 @@ func (r *reconciler) ensureValidatingAdmissionPolicyBinding(ctx context.Context)
 
 	var current admissionregistrationv1.ValidatingAdmissionPolicyBinding
 	if err := r.client.Get(ctx, name, &current); err != nil {
-		if !errors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("failed to get ValidatingAdmissionPolicyBinding %s: %w", desired.Name, err)
 		}
 		if err := r.client.Create(ctx, desired); err != nil {
@@ -167,9 +183,17 @@ func (r *reconciler) ensureValidatingAdmissionPolicyBinding(ctx context.Context)
 // for the retry/fail-closed contract within this function.)
 // Returns nil if both are already absent.
 func (r *reconciler) deleteAdmissionPolicy(ctx context.Context) error {
+	cvoManaged, err := r.cvoManagesAdmissionPolicy(ctx)
+	if err != nil {
+		return err
+	}
+	if cvoManaged {
+		return errCVOManagedAdmissionPolicy
+	}
+
 	policy := &admissionregistrationv1.ValidatingAdmissionPolicy{}
 	policy.Name = baseAdmissionPolicy.Name
-	if err := r.client.Delete(ctx, policy); err != nil && !errors.IsNotFound(err) {
+	if err := r.client.Delete(ctx, policy); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete ValidatingAdmissionPolicy %s: %w", policy.Name, err)
 	} else if err == nil {
 		log.Info("deleted ValidatingAdmissionPolicy", "name", policy.Name)
@@ -177,13 +201,42 @@ func (r *reconciler) deleteAdmissionPolicy(ctx context.Context) error {
 
 	binding := &admissionregistrationv1.ValidatingAdmissionPolicyBinding{}
 	binding.Name = desiredAdmissionPolicyBinding.Name
-	if err := r.client.Delete(ctx, binding); err != nil && !errors.IsNotFound(err) {
+	if err := r.client.Delete(ctx, binding); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete ValidatingAdmissionPolicyBinding %s: %w", binding.Name, err)
 	} else if err == nil {
 		log.Info("deleted ValidatingAdmissionPolicyBinding", "name", binding.Name)
 	}
 
 	return nil
+}
+
+// cvoManagesAdmissionPolicy reports whether either admission-policy resource
+// is still rendered by CVO's Default feature set. During the temporary
+// handoff, CIO must not mutate a resource CVO is reconciling.
+func (r *reconciler) cvoManagesAdmissionPolicy(ctx context.Context) (bool, error) {
+	policy := &admissionregistrationv1.ValidatingAdmissionPolicy{}
+	if err := r.client.Get(ctx, types.NamespacedName{Name: baseAdmissionPolicy.Name}, policy); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return false, fmt.Errorf("failed to get ValidatingAdmissionPolicy %s: %w", baseAdmissionPolicy.Name, err)
+		}
+	} else if policy.Annotations[cvoFeatureSetAnnotation] == "Default" {
+		return true, nil
+	}
+
+	binding := &admissionregistrationv1.ValidatingAdmissionPolicyBinding{}
+	if err := r.client.Get(ctx, types.NamespacedName{Name: desiredAdmissionPolicyBinding.Name}, binding); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return false, fmt.Errorf("failed to get ValidatingAdmissionPolicyBinding %s: %w", desiredAdmissionPolicyBinding.Name, err)
+		}
+	} else if binding.Annotations[cvoFeatureSetAnnotation] == "Default" {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func isCVOManagedAdmissionPolicy(err error) bool {
+	return stderrors.Is(err, errCVOManagedAdmissionPolicy)
 }
 
 // admissionPolicyUpToDate returns true when the current VAP spec

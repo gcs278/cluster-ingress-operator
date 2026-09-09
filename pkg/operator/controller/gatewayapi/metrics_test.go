@@ -1,7 +1,6 @@
 package gatewayapi
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -11,10 +10,6 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-
-	operatorv1alpha1 "github.com/openshift/api/operator/v1alpha1"
-
-	operatorcontroller "github.com/openshift/cluster-ingress-operator/pkg/operator/controller"
 )
 
 // gaugeValue extracts the float64 value of a prometheus.Gauge.
@@ -82,74 +77,6 @@ func TestUpdateManagementModeMetrics_TakeoverBlocked(t *testing.T) {
 		"Managed gauge should be 0 when takeover blocked")
 	assert.Equal(t, float64(1), gaugeValue(t, gatewayAPIManagementModeMetric.WithLabelValues("Unmanaged")),
 		"Unmanaged gauge should be 1 when takeover blocked")
-}
-
-func TestUpdateModeTransitionFailedMetric(t *testing.T) {
-	// Start from a clean slate.
-	gatewayAPIModeTransitionFailedMetric.Reset()
-	modeTransitionFailedMetricMu.Lock()
-	lastFailingTarget = ""
-	modeTransitionFailedMetricMu.Unlock()
-
-	updateModeTransitionFailedMetric(operatorcontroller.TransitionState{})
-	assert.Equal(t, 0, collectGaugeVecCount(gatewayAPIModeTransitionFailedMetric),
-		"metric should be absent when no transition is in progress")
-
-	updateModeTransitionFailedMetric(operatorcontroller.TransitionState{
-		InProgress: true,
-		Target:     operatorv1alpha1.GatewayAPIManagementModeUnmanaged,
-	})
-	assert.Equal(t, 0, collectGaugeVecCount(gatewayAPIModeTransitionFailedMetric),
-		"metric should be absent when transition is in progress without an error")
-
-	updateModeTransitionFailedMetric(operatorcontroller.TransitionState{
-		InProgress: true,
-		Target:     operatorv1alpha1.GatewayAPIManagementModeUnmanaged,
-		Error:      fmt.Errorf("Sail uninstall failed"),
-	})
-	assert.Equal(t, float64(1), gaugeValue(t, gatewayAPIModeTransitionFailedMetric.WithLabelValues("Unmanaged")),
-		"metric should be 1 for the failing target")
-	assert.Equal(t, 1, collectGaugeVecCount(gatewayAPIModeTransitionFailedMetric),
-		"only one series should be present")
-
-	// Flip the failing target: the old label must disappear.
-	updateModeTransitionFailedMetric(operatorcontroller.TransitionState{
-		InProgress: true,
-		Target:     operatorv1alpha1.GatewayAPIManagementModeManaged,
-		Error:      fmt.Errorf("failed to create ValidatingAdmissionPolicy"),
-	})
-	assert.Equal(t, float64(1), gaugeValue(t, gatewayAPIModeTransitionFailedMetric.WithLabelValues("Managed")),
-		"metric should be 1 for the new failing target")
-	assert.Equal(t, 1, collectGaugeVecCount(gatewayAPIModeTransitionFailedMetric),
-		"only the new target series should be present")
-
-	// The error clears: the metric must be removed entirely.
-	updateModeTransitionFailedMetric(operatorcontroller.TransitionState{})
-	assert.Equal(t, 0, collectGaugeVecCount(gatewayAPIModeTransitionFailedMetric),
-		"metric should be absent once the transition succeeds")
-}
-
-// TestUpdateModeTransitionFailedMetric_RepeatedFailureNoGap verifies that
-// repeating the same failing target across retries never calls a blanket
-// Reset(): the series must remain continuously present (never zero
-// collected series), since that would be observable as a false "not
-// failing" reading by a concurrent Prometheus scrape.
-func TestUpdateModeTransitionFailedMetric_RepeatedFailureNoGap(t *testing.T) {
-	gatewayAPIModeTransitionFailedMetric.Reset()
-	modeTransitionFailedMetricMu.Lock()
-	lastFailingTarget = ""
-	modeTransitionFailedMetricMu.Unlock()
-
-	for i := 0; i < 5; i++ {
-		updateModeTransitionFailedMetric(operatorcontroller.TransitionState{
-			InProgress: true,
-			Target:     operatorv1alpha1.GatewayAPIManagementModeUnmanaged,
-			Error:      fmt.Errorf("retry %d failed", i),
-		})
-		assert.Equal(t, 1, collectGaugeVecCount(gatewayAPIModeTransitionFailedMetric),
-			"series must remain present across repeated failures of the same target")
-		assert.Equal(t, float64(1), gaugeValue(t, gatewayAPIModeTransitionFailedMetric.WithLabelValues("Unmanaged")))
-	}
 }
 
 func TestUpdateUnmanagedCRDsMetric(t *testing.T) {

@@ -810,6 +810,10 @@ func TestReconcile_TakeoverBlocked_SkipsCRDAndRBAC(t *testing.T) {
 		"TakeoverBlocked gate-ON path must not requeue; watches on Ingress CR/CRDs/VAP/ClusterRoles trigger the next reconcile")
 
 	assert.False(t, modeAccessor.ShouldManageCRDs(), "TakeoverBlocked must not manage CRDs")
+	transition := modeAccessor.GetTransitionState()
+	assert.True(t, transition.InProgress, "TakeoverBlocked must remain an incomplete transition")
+	assert.Equal(t, operatorv1alpha1.GatewayAPIManagementModeManaged, transition.Target)
+	assert.Nil(t, modeAccessor.GetLastAppliedMode(), "TakeoverBlocked must not be recorded as an applied mode")
 	assert.Empty(t, cl.Added, "no CRDs should be created when TakeoverBlocked")
 	assert.Empty(t, cl.Updated, "existing CRDs must not be overwritten when TakeoverBlocked")
 
@@ -821,6 +825,27 @@ func TestReconcile_TakeoverBlocked_SkipsCRDAndRBAC(t *testing.T) {
 	assert.NotNil(t, managedCond)
 	assert.Equal(t, metav1.ConditionFalse, managedCond.Status)
 	assert.Equal(t, reasonTakeoverBlocked, managedCond.Reason)
+
+	// A restarted controller must derive that TakeoverBlocked is still in
+	// progress from Ingress status, rather than treating it as a terminal
+	// Managed state.
+	restartedAccessor := operatorcontroller.NewGatewayAPIModeAccessor(true)
+	restarted := &reconciler{
+		client: cl,
+		cache:  fakeCache,
+		config: Config{
+			MarketplaceEnabled:              true,
+			OperatorLifecycleManagerEnabled: true,
+			ModeAccessor:                    restartedAccessor,
+		},
+		fieldIndexer: FakeIndexer{},
+	}
+	_, err = restarted.Reconcile(context.Background(), req)
+	assert.NoError(t, err)
+	transition = restartedAccessor.GetTransitionState()
+	assert.True(t, transition.InProgress, "TakeoverBlocked must remain in progress after restart")
+	assert.Equal(t, operatorv1alpha1.GatewayAPIManagementModeManaged, transition.Target)
+	assert.Nil(t, restartedAccessor.GetLastAppliedMode())
 }
 
 // TestReconcile_PartialPresenceNonCompliant_TakeoverBlocked verifies
@@ -1040,8 +1065,8 @@ func TestReconcile_ManagedAndAbsent_InstallsCRDs(t *testing.T) {
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "cluster"}}
 	res, err := r.Reconcile(context.Background(), req)
 	assert.NoError(t, err)
-	assert.Equal(t, reconcile.Result{}, res,
-		"gate-ON Managed happy path must not requeue; the CRD watch triggers the next reconcile once CRDs become present/compliant")
+	assert.Equal(t, reconcile.Result{RequeueAfter: 10 * time.Second}, res,
+		"gate-ON Managed reconciliation must requeue until the newly created CRDs are established")
 
 	assert.True(t, modeAccessor.ShouldManageCRDs(), "Managed + absent must allow CRD management")
 	var crdCount, rbacCount int
@@ -1440,6 +1465,16 @@ func TestReconcile_SteadyState_NoSpuriousInProgress(t *testing.T) {
 		"steady-state reconcile must NOT set InProgress=true")
 	assert.NotNil(t, modeAccessor.GetLastAppliedMode())
 	assert.Equal(t, operatorv1alpha1.GatewayAPIManagementModeManaged, *modeAccessor.GetLastAppliedMode())
+
+	// A transient error while reconciling the already-applied mode must be
+	// returned for retry without reporting a management-mode transition.
+	cl.Client = &crdGetErrorClient{Client: fakeClient}
+	_, err = r.Reconcile(context.Background(), req)
+	assert.Error(t, err)
+	ts = modeAccessor.GetTransitionState()
+	assert.False(t, ts.InProgress,
+		"a steady-state reconciliation error must not report Progressing")
+	assert.NoError(t, ts.Error)
 }
 
 // TestReconcile_ModeChange_SetsInProgress verifies that when the desired
@@ -1695,4 +1730,115 @@ func TestReconcile_SteadyStateUnmanaged_SkipsTransitionOps(t *testing.T) {
 		"no VAP/VAPBinding deletions should occur on steady-state Unmanaged reconcile")
 	assert.False(t, ts.InProgress,
 		"steady-state reconcile must NOT set InProgress=true")
+}
+
+// TestReconcile_UnmanagedWaitsForCVOAdmissionPolicy verifies that CIO does
+// not claim an Unmanaged transition is complete while CVO still renders the
+// VAP or binding from the Default feature set.
+func TestReconcile_UnmanagedWaitsForCVOAdmissionPolicy(t *testing.T) {
+	scheme := runtime.NewScheme()
+	configv1.Install(scheme)
+	admissionregistrationv1.AddToScheme(scheme)
+	operatorv1alpha1.Install(scheme)
+
+	ingressObj := &operatorv1alpha1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{Name: "cluster"},
+		Spec: operatorv1alpha1.IngressSpec{
+			GatewayAPI: operatorv1alpha1.GatewayAPIIngressConfig{
+				ManagementMode: operatorv1alpha1.GatewayAPIManagementModeUnmanaged,
+			},
+		},
+	}
+	vap := baseAdmissionPolicy.DeepCopy()
+	vap.Annotations = map[string]string{cvoFeatureSetAnnotation: "Default"}
+	binding := desiredAdmissionPolicyBinding.DeepCopy()
+	binding.Annotations = map[string]string{cvoFeatureSetAnnotation: "Default"}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(ingressObj, vap, binding).
+		Build()
+	cl := &testutil.FakeClientRecorder{
+		Client:  fakeClient,
+		T:       t,
+		Added:   []client.Object{},
+		Updated: []client.Object{},
+		Deleted: []client.Object{},
+	}
+	informer := informertest.FakeInformers{Scheme: scheme}
+	modeAccessor := operatorcontroller.NewGatewayAPIModeAccessor(true)
+	r := &reconciler{
+		client: cl,
+		cache:  &testutil.FakeCache{Informers: &informer, Reader: fakeClient},
+		config: Config{ModeAccessor: modeAccessor},
+	}
+
+	res, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "cluster"}})
+	assert.NoError(t, err)
+	assert.Equal(t, reconcile.Result{}, res)
+	assert.Empty(t, cl.Deleted, "CIO must not delete CVO-managed admission-policy resources")
+	assert.Nil(t, modeAccessor.GetLastAppliedMode(), "Unmanaged must not be recorded until CVO releases the VAP")
+	transition := modeAccessor.GetTransitionState()
+	assert.True(t, transition.InProgress)
+	assert.Equal(t, operatorv1alpha1.GatewayAPIManagementModeUnmanaged, transition.Target)
+
+	var updated operatorv1alpha1.Ingress
+	assert.NoError(t, fakeClient.Get(context.Background(), types.NamespacedName{Name: "cluster"}, &updated))
+	assert.Empty(t, updated.Status.Conditions, "terminal Unmanaged status must not be written while CVO owns the VAP")
+}
+
+// TestReconcile_RestartInSteadyStateUnmanaged_SkipsTransitionOps verifies
+// that the persisted Ingress status, rather than process-local state, prevents
+// a CIO restart from repeating an already-completed Unmanaged transition.
+func TestReconcile_RestartInSteadyStateUnmanaged_SkipsTransitionOps(t *testing.T) {
+	scheme := runtime.NewScheme()
+	configv1.Install(scheme)
+	apiextensionsv1.AddToScheme(scheme)
+	rbacv1.AddToScheme(scheme)
+	operatorv1alpha1.Install(scheme)
+	admissionregistrationv1.AddToScheme(scheme)
+
+	ingressObj := &operatorv1alpha1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{Name: "cluster"},
+		Spec: operatorv1alpha1.IngressSpec{
+			GatewayAPI: operatorv1alpha1.GatewayAPIIngressConfig{
+				ManagementMode: operatorv1alpha1.GatewayAPIManagementModeUnmanaged,
+			},
+		},
+		Status: operatorv1alpha1.IngressStatus{Conditions: []metav1.Condition{{
+			Type:   conditionTypeGatewayAPICRDsManaged,
+			Status: metav1.ConditionFalse,
+			Reason: reasonUnmanaged,
+		}}},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(ingressObj, &configv1.ClusterOperator{ObjectMeta: metav1.ObjectMeta{Name: "ingress"}}).
+		WithStatusSubresource(ingressObj.DeepCopy()).
+		WithIndex(&apiextensionsv1.CustomResourceDefinition{}, gatewayAPICRDIndexFieldName, client.IndexerFunc(func(client.Object) []string {
+			return []string{}
+		})).
+		Build()
+
+	informer := informertest.FakeInformers{Scheme: scheme}
+	fakeCache := &testutil.FakeCache{Informers: &informer, Reader: fakeClient}
+	uninstaller := &fakeSailUninstaller{}
+	modeAccessor := operatorcontroller.NewGatewayAPIModeAccessor(true) // Fresh accessor simulates a CIO restart.
+	r := &reconciler{
+		client: fakeClient,
+		cache:  fakeCache,
+		config: Config{
+			MarketplaceEnabled:              true,
+			OperatorLifecycleManagerEnabled: true,
+			ModeAccessor:                    modeAccessor,
+			SailUninstaller:                 uninstaller,
+		},
+		fieldIndexer: FakeIndexer{},
+	}
+
+	_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "cluster"}})
+	assert.NoError(t, err)
+	assert.False(t, uninstaller.called, "an already-completed Unmanaged transition must not be repeated after restart")
+	assert.False(t, modeAccessor.GetTransitionState().InProgress, "restart must not create a synthetic mode transition")
 }

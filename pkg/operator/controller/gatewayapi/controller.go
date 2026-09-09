@@ -285,12 +285,23 @@ func (r *reconciler) resolveIngressModeSnapshot(ctx context.Context) (ingressMod
 	}, nil
 }
 
-// setTransitionState records mode transition progress on the shared
-// ModeAccessor and mirrors it into the mode-transition-failed metric, so
-// the two are never allowed to drift out of sync.
+// setTransitionState records mode transition progress on the shared ModeAccessor.
 func (r *reconciler) setTransitionState(state operatorcontroller.TransitionState) {
 	r.config.ModeAccessor.SetTransitionState(state)
-	updateModeTransitionFailedMetric(state)
+}
+
+// setTransitionError records an error only while processing an explicit mode
+// transition. Ordinary reconciliation errors must be retried, but do not mean
+// the operator is progressing between steady states.
+func (r *reconciler) setTransitionError(modeChanged bool, target operatorv1alpha1.GatewayAPIManagementMode, err error) {
+	if !modeChanged {
+		return
+	}
+	r.setTransitionState(operatorcontroller.TransitionState{
+		InProgress: true,
+		Target:     target,
+		Error:      err,
+	})
 }
 
 // Reconcile expects request to refer to a FeatureGate and creates or
@@ -317,6 +328,12 @@ func (r *reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		// InProgress=true, causing ClusterOperator Progressing=True
 		// flaps that block upgrades and fire alerts.
 		lastApplied := r.config.ModeAccessor.GetLastAppliedMode()
+		if lastApplied == nil {
+			if appliedMode, applied := appliedModeFromIngressStatus(snapshot); applied {
+				r.config.ModeAccessor.SetLastAppliedMode(appliedMode)
+				lastApplied = &appliedMode
+			}
+		}
 		modeChanged := lastApplied == nil || *lastApplied != snapshot.desiredMode
 		if modeChanged {
 			r.setTransitionState(operatorcontroller.TransitionState{
@@ -343,23 +360,23 @@ func (r *reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		// repeating them every 30s wastes resources.
 		if modeChanged {
 			if err := r.reconcileAdmissionPolicyTransition(ctx, snapshot); err != nil {
-				r.setTransitionState(operatorcontroller.TransitionState{
-					InProgress: true,
-					Target:     snapshot.desiredMode,
-					Error:      err,
-				})
+				if isCVOManagedAdmissionPolicy(err) {
+					// CVO still owns the VAP or binding. The Unmanaged
+					// transition cannot complete until CVO stops rendering it;
+					// retain InProgress and wait for the resource watch.
+					return reconcile.Result{}, nil
+				}
+				r.setTransitionError(modeChanged, snapshot.desiredMode, err)
 				return reconcile.Result{}, err
 			}
 		}
 
 		// Phase 3: resolve desired mode BEFORE mutating CRDs/RBAC so
-		// that Unmanaged or TakeoverBlocked states skip ensure.
-		if err := r.reconcileIngressStatus(ctx, snapshot); err != nil {
-			r.setTransitionState(operatorcontroller.TransitionState{
-				InProgress: true,
-				Target:     snapshot.desiredMode,
-				Error:      err,
-			})
+		// that Unmanaged or TakeoverBlocked states skip ensure. Do not
+		// write status yet: it must describe completed, not in-progress,
+		// Managed-mode reconciliation.
+		if err := r.reconcileIngressStatus(ctx, snapshot, false); err != nil {
+			r.setTransitionError(modeChanged, snapshot.desiredMode, err)
 			return reconcile.Result{}, err
 		}
 
@@ -367,36 +384,35 @@ func (r *reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		// resolved mode is Managed (not Unmanaged, not TakeoverBlocked).
 		if r.config.ModeAccessor.ShouldManageCRDs() {
 			if err := r.ensureAdmissionPolicy(ctx); err != nil {
-				r.setTransitionState(operatorcontroller.TransitionState{
-					InProgress: true,
-					Target:     snapshot.desiredMode,
-					Error:      err,
-				})
+				r.setTransitionError(modeChanged, snapshot.desiredMode, err)
 				return reconcile.Result{}, err
 			}
 			if err := r.ensureGatewayAPICRDs(ctx); err != nil {
-				r.setTransitionState(operatorcontroller.TransitionState{
-					InProgress: true,
-					Target:     snapshot.desiredMode,
-					Error:      err,
-				})
+				r.setTransitionError(modeChanged, snapshot.desiredMode, err)
 				return reconcile.Result{}, err
 			}
 			if err := r.ensureGatewayAPIRBAC(ctx); err != nil {
-				r.setTransitionState(operatorcontroller.TransitionState{
-					InProgress: true,
-					Target:     snapshot.desiredMode,
-					Error:      err,
-				})
+				r.setTransitionError(modeChanged, snapshot.desiredMode, err)
 				return reconcile.Result{}, err
 			}
 		}
 
-		// All transition operations completed successfully.
-		// Record the applied mode so subsequent steady-state reconciles
-		// skip setting InProgress, then clear the transition state.
-		r.config.ModeAccessor.SetLastAppliedMode(snapshot.desiredMode)
-		r.setTransitionState(operatorcontroller.TransitionState{})
+		// Persist the terminal state only after all required operations have
+		// succeeded. Recompute the CRD conditions because a Managed reconcile
+		// may have installed or upgraded them.
+		if err := r.reconcileIngressStatus(ctx, snapshot, true); err != nil {
+			r.setTransitionError(modeChanged, snapshot.desiredMode, err)
+			return reconcile.Result{}, err
+		}
+
+		// A blocked takeover remains an incomplete Managed transition.  Do not
+		// record it as applied or clear InProgress: the status controller must
+		// continue reporting Progressing until the administrator remedies the
+		// conflicting CRDs.
+		if snapshot.desiredMode != operatorv1alpha1.GatewayAPIManagementModeManaged || r.config.ModeAccessor.ShouldManageCRDs() {
+			r.config.ModeAccessor.SetLastAppliedMode(snapshot.desiredMode)
+			r.setTransitionState(operatorcontroller.TransitionState{})
+		}
 	} else {
 		// Gate OFF: preserve legacy always-ensure behavior.
 		if err := r.ensureGatewayAPICRDs(ctx); err != nil {

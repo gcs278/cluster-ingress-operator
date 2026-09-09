@@ -125,7 +125,7 @@ func NewUnmanaged(mgr manager.Manager, config Config, modeAccessor *operatorcont
 	// TechPreview/DevPreview clusters.
 	if modeAccessor != nil && modeAccessor.GateEnabled() {
 		ingressToServices := operatorcontroller.IngressWakeUpMapper(operatorCache, func() client.ObjectList { return &corev1.ServiceList{} }, client.InNamespace(config.OperandNamespace), client.HasLabels{operatorcontroller.ManagedByIstioLabelKey})
-		if err := c.Watch(source.Kind[client.Object](operatorCache, &operatorv1alpha1.Ingress{}, handler.EnqueueRequestsFromMapFunc(ingressToServices))); err != nil {
+		if err := c.Watch(source.Kind[client.Object](operatorCache, &operatorv1alpha1.Ingress{}, handler.EnqueueRequestsFromMapFunc(ingressToServices), operatorcontroller.GatewayAPIModeChangePredicate())); err != nil {
 			return nil, err
 		}
 	}

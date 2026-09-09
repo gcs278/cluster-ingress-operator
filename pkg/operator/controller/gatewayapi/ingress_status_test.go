@@ -342,7 +342,7 @@ func TestReconcileIngressStatus(t *testing.T) {
 				}
 			}
 
-			err := r.reconcileIngressStatus(context.Background(), snapshot)
+			err := r.reconcileIngressStatus(context.Background(), snapshot, true)
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.wantAllowDeps, modeAccessor.AllowDependents(), "AllowDependents mismatch")
@@ -449,7 +449,7 @@ func TestReconcileIngressStatus_UnknownGatewayAPICRD(t *testing.T) {
 		ingress:     ingressObj,
 		found:       true,
 	}
-	err := r.reconcileIngressStatus(context.Background(), snapshot)
+	err := r.reconcileIngressStatus(context.Background(), snapshot, true)
 	require.NoError(t, err)
 
 	assert.False(t, modeAccessor.AllowDependents(), "must not allow dependents while an unknown CRD is present")
@@ -524,7 +524,7 @@ func TestReconcileIngressStatus_AnnotationMismatch(t *testing.T) {
 		ingress:     ingressObj,
 		found:       true,
 	}
-	err := r.reconcileIngressStatus(context.Background(), snapshot)
+	err := r.reconcileIngressStatus(context.Background(), snapshot, true)
 	require.NoError(t, err)
 
 	assert.False(t, modeAccessor.AllowDependents(), "should not allow dependents when CRDs non-compliant")
@@ -610,7 +610,7 @@ func TestReconcileIngressStatus_PartialPresenceNonCompliant(t *testing.T) {
 		ingress:     ingressObj,
 		found:       true,
 	}
-	err := r.reconcileIngressStatus(context.Background(), snapshot)
+	err := r.reconcileIngressStatus(context.Background(), snapshot, true)
 	require.NoError(t, err)
 
 	assert.False(t, modeAccessor.ShouldManageCRDs(), "partial presence with non-compliant CRD must block management")
@@ -707,7 +707,7 @@ func TestReconcileIngressStatus_ObservedGeneration(t *testing.T) {
 		ingress:     ingressObj,
 		found:       true,
 	}
-	err := r.reconcileIngressStatus(context.Background(), snapshot)
+	err := r.reconcileIngressStatus(context.Background(), snapshot, true)
 	require.NoError(t, err)
 
 	var updated operatorv1alpha1.Ingress

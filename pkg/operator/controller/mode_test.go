@@ -218,9 +218,14 @@ func TestModeAccessor_DependentPredicate(t *testing.T) {
 	p := m.DependentPredicate()
 
 	m.Update(operatorv1alpha1.GatewayAPIManagementModeManaged, false, false, false)
+	assert.False(t, p.Create(event.CreateEvent{}), "predicate should deny creates when AllowDependents=false")
+	assert.False(t, p.Update(event.UpdateEvent{}), "predicate should deny updates when AllowDependents=false")
 	assert.False(t, p.Generic(event.GenericEvent{}), "predicate should deny when AllowDependents=false")
+	assert.True(t, p.Delete(event.DeleteEvent{}), "predicate must allow deletes for finalizer cleanup")
 
 	m.Update(operatorv1alpha1.GatewayAPIManagementModeManaged, true, true, true)
+	assert.True(t, p.Create(event.CreateEvent{}), "predicate should allow creates when AllowDependents=true")
+	assert.True(t, p.Update(event.UpdateEvent{}), "predicate should allow updates when AllowDependents=true")
 	assert.True(t, p.Generic(event.GenericEvent{}), "predicate should allow when AllowDependents=true")
 }
 

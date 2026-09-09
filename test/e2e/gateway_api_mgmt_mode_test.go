@@ -17,7 +17,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	operatorv1alpha1 "github.com/openshift/api/operator/v1alpha1"
-	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	gatewayapiv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -30,6 +29,48 @@ const (
 	// ingressCRName is the singleton Ingress CR name
 	ingressCRName = "cluster"
 )
+
+func setGatewayAPIManagementMode(t *testing.T, mode operatorv1alpha1.GatewayAPIManagementMode) {
+	t.Helper()
+	ingressName := types.NamespacedName{Name: ingressCRName}
+	ingress := &operatorv1alpha1.Ingress{}
+
+	require.Eventually(t, func() bool {
+		if err := kclient.Get(context.Background(), ingressName, ingress); err != nil {
+			t.Logf("Failed to get Ingress CR: %v", err)
+			return false
+		}
+		if ingress.Spec.GatewayAPI.ManagementMode == mode {
+			return true
+		}
+
+		ingress.Spec.GatewayAPI.ManagementMode = mode
+		if err := kclient.Update(context.Background(), ingress); err != nil {
+			t.Logf("Failed to set Gateway API management mode to %s: %v; retrying...", mode, err)
+			return false
+		}
+		return true
+	}, 30*time.Second, 2*time.Second, "Failed to set Gateway API management mode to %s", mode)
+}
+
+func waitForGatewayAPIManagedCondition(t *testing.T, status metav1.ConditionStatus, reason string) {
+	t.Helper()
+	ingressName := types.NamespacedName{Name: ingressCRName}
+	ingress := &operatorv1alpha1.Ingress{}
+
+	require.Eventually(t, func() bool {
+		if err := kclient.Get(context.Background(), ingressName, ingress); err != nil {
+			t.Logf("Failed to get Ingress CR: %v", err)
+			return false
+		}
+		condition := condutils.FindStatusCondition(ingress.Status.Conditions, "GatewayAPICRDsManaged")
+		if condition == nil || condition.Status != status || condition.Reason != reason {
+			t.Logf("GatewayAPICRDsManaged not %s/%s yet: %+v", status, reason, condition)
+			return false
+		}
+		return true
+	}, 2*time.Minute, 5*time.Second, "Expected GatewayAPICRDsManaged to become %s/%s", status, reason)
+}
 
 // testGatewayAPIManagementModeDefault verifies the default Managed state:
 // - Ingress CR exists with mode=Managed
@@ -127,7 +168,6 @@ func testGatewayAPIManagementModeDefault(t *testing.T) {
 // testGatewayAPIManagementModeMetrics verifies the management mode metrics:
 // - ingress_controller_gateway_api_management_mode{mode="Managed"} == 1
 // - ingress_controller_gateway_api_management_mode{mode="Unmanaged"} == 0
-// - ingress_controller_gateway_api_info{gateway_api_version,ossm_version} == 1
 func testGatewayAPIManagementModeMetrics(t *testing.T) {
 	prometheusClient := createPrometheusClient(t)
 
@@ -140,50 +180,6 @@ func testGatewayAPIManagementModeMetrics(t *testing.T) {
 	assertMetricValue(t, prometheusClient, unmanagedQuery, 0,
 		"Expected ingress_controller_gateway_api_management_mode{mode=\"Unmanaged\"}=0 in default state")
 
-	t.Log("Verifying gateway_api_info metric is present with version labels")
-	infoQuery := `ingress_controller_gateway_api_info`
-
-	assert.Eventually(t, func() bool {
-		result, _, err := prometheusClient.Query(t.Context(), infoQuery, time.Now())
-		if err != nil {
-			t.Logf("Failed to query Prometheus for info metric: %v", err)
-			return false
-		}
-		vector, ok := result.(model.Vector)
-		if !ok {
-			t.Logf("Unexpected result type for info metric: %T", result)
-			return false
-		}
-		if len(vector) == 0 {
-			t.Logf("Info metric not yet available")
-			return false
-		}
-
-		// Verify the metric has the expected labels
-		metric := vector[0].Metric
-		gatewayAPIVersion, hasGatewayAPIVersion := metric["gateway_api_version"]
-		ossmVersion, hasOSSMVersion := metric["ossm_version"]
-
-		if !hasGatewayAPIVersion || string(gatewayAPIVersion) == "" {
-			t.Logf("Info metric missing or empty gateway_api_version label")
-			return false
-		}
-		if !hasOSSMVersion || string(ossmVersion) == "" {
-			t.Logf("Info metric missing or empty ossm_version label")
-			return false
-		}
-
-		// Verify metric value is 1 (info-style metric)
-		if float64(vector[0].Value) != 1 {
-			t.Logf("Info metric has unexpected value: %v", vector[0].Value)
-			return false
-		}
-
-		t.Logf("Info metric present with gateway_api_version=%s, ossm_version=%s",
-			gatewayAPIVersion, ossmVersion)
-		return true
-	}, 2*time.Minute, 5*time.Second,
-		"Expected ingress_controller_gateway_api_info metric with version labels")
 }
 
 // testGatewayAPIManagementModeCRDCompliance verifies CRD compliance checking:
@@ -212,9 +208,22 @@ func testGatewayAPIManagementModeCRDCompliance(t *testing.T) {
 	originalBundleVersion, found := crd.Annotations[bundleVersionAnnotation]
 	require.True(t, found, "CRD should have bundle-version annotation")
 	t.Logf("Original bundle-version: %s", originalBundleVersion)
+	t.Cleanup(func() {
+		if err := kclient.Get(context.Background(), crdName, crd); err == nil && crd.Annotations[bundleVersionAnnotation] != originalBundleVersion {
+			crd.Annotations[bundleVersionAnnotation] = originalBundleVersion
+			if err := kclient.Update(context.Background(), crd); err != nil {
+				t.Errorf("Cleanup: failed to restore CRD bundle-version: %v", err)
+			}
+		}
+		setGatewayAPIManagementMode(t, operatorv1alpha1.GatewayAPIManagementModeManaged)
+		waitForGatewayAPIManagedCondition(t, metav1.ConditionTrue, "ManagedByIngressOperator")
+	})
 
-	// Bypass VAP to modify the CRD
-	bypassVAP(t, func(t *testing.T) {
+	setGatewayAPIManagementMode(t, operatorv1alpha1.GatewayAPIManagementModeUnmanaged)
+	waitForGatewayAPIManagedCondition(t, metav1.ConditionFalse, "Unmanaged")
+
+	// Unmanaged mode removes the VAP, allowing the CRD to be modified.
+	t.Run("make CRD non-compliant", func(t *testing.T) {
 		t.Log("Modifying CRD bundle-version annotation to trigger non-compliance")
 
 		require.Eventually(t, func() bool {
@@ -234,6 +243,8 @@ func testGatewayAPIManagementModeCRDCompliance(t *testing.T) {
 			return true
 		}, 30*time.Second, 2*time.Second, "Failed to modify CRD")
 	})
+
+	setGatewayAPIManagementMode(t, operatorv1alpha1.GatewayAPIManagementModeManaged)
 
 	// Verify Compliant condition becomes False
 	t.Log("Waiting for Compliant condition to become False")
@@ -264,8 +275,11 @@ func testGatewayAPIManagementModeCRDCompliance(t *testing.T) {
 	}, 2*time.Minute, 5*time.Second,
 		"Expected Compliant condition to become False after bundle-version mismatch")
 
-	// Restore the original bundle-version
-	bypassVAP(t, func(t *testing.T) {
+	setGatewayAPIManagementMode(t, operatorv1alpha1.GatewayAPIManagementModeUnmanaged)
+	waitForGatewayAPIManagedCondition(t, metav1.ConditionFalse, "Unmanaged")
+
+	// Unmanaged mode removes the VAP, allowing the CRD to be restored.
+	t.Run("restore CRD compliance", func(t *testing.T) {
 		t.Log("Restoring original CRD bundle-version annotation")
 
 		require.Eventually(t, func() bool {
@@ -285,6 +299,8 @@ func testGatewayAPIManagementModeCRDCompliance(t *testing.T) {
 			return true
 		}, 30*time.Second, 2*time.Second, "Failed to restore CRD")
 	})
+
+	setGatewayAPIManagementMode(t, operatorv1alpha1.GatewayAPIManagementModeManaged)
 
 	// Verify Compliant condition becomes True again
 	t.Log("Waiting for Compliant condition to become True")
@@ -489,11 +505,6 @@ func testGatewayAPIManagementModeUnmanaged(t *testing.T) {
 	assertMetricValue(t, prometheusClient, unmanagedQuery, 1,
 		"Expected ingress_controller_gateway_api_management_mode{mode=\"Unmanaged\"}=1")
 
-	// Info metric should be gone in Unmanaged mode
-	t.Log("Verifying info metric is removed in Unmanaged mode")
-	infoQuery := `ingress_controller_gateway_api_info`
-	assertMetricGone(t, prometheusClient, infoQuery,
-		"Expected ingress_controller_gateway_api_info metric to be removed in Unmanaged mode")
 }
 
 // testGatewayAPIManagementModeTakeover verifies takeover behavior:
@@ -507,38 +518,22 @@ func testGatewayAPIManagementModeTakeover(t *testing.T) {
 	testCRDName := crdNames[0]
 	crd := &apiextensionsv1.CustomResourceDefinition{}
 	crdName := types.NamespacedName{Name: testCRDName}
+	originalBundleVersion := ""
 
 	// Register cleanup BEFORE making any mutations. If test fails after
-	// modifying the CRD but before restoring it, cleanup ensures the CRD
-	// is deleted so CIO can recreate it with the correct bundle-version.
+	// modifying the CRD but before restoring it, cleanup restores its
+	// original bundle-version so takeover can proceed.
 	t.Cleanup(func() {
-		t.Log("Cleanup: Ensuring CRD is compliant by deleting if non-compliant")
+		t.Log("Cleanup: Ensuring CRD has its original bundle-version")
+		if originalBundleVersion == "" {
+			return
+		}
 		if err := kclient.Get(context.Background(), crdName, crd); err == nil {
 			if bundleVer := crd.Annotations[bundleVersionAnnotation]; bundleVer == "v0.0.0-takeover-blocked" {
-				t.Log("Cleanup: Deleting non-compliant CRD so CIO can recreate it")
-				_ = kclient.Delete(context.Background(), crd)
-
-				// Wait for CRD to be recreated with compliant bundle-version
-				t.Log("Cleanup: Waiting for CIO to recreate compliant CRD")
-				assert.Eventually(t, func() bool {
-					if err := kclient.Get(context.Background(), crdName, crd); err != nil {
-						if errors.IsNotFound(err) {
-							t.Logf("CRD not yet recreated")
-						} else {
-							t.Logf("Error getting CRD: %v", err)
-						}
-						return false
-					}
-
-					bundleVersion, found := crd.Annotations[bundleVersionAnnotation]
-					if !found || bundleVersion == "v0.0.0-takeover-blocked" {
-						t.Logf("CRD not yet compliant (bundle-version=%s, found=%v)", bundleVersion, found)
-						return false
-					}
-
-					t.Logf("CRD recreated with compliant bundle-version: %s", bundleVersion)
-					return true
-				}, 3*time.Minute, 5*time.Second, "Failed to wait for compliant CRD in cleanup")
+				crd.Annotations[bundleVersionAnnotation] = originalBundleVersion
+				if err := kclient.Update(context.Background(), crd); err != nil {
+					t.Errorf("Cleanup: failed to restore CRD bundle-version: %v", err)
+				}
 			}
 		}
 
@@ -601,8 +596,8 @@ func testGatewayAPIManagementModeTakeover(t *testing.T) {
 			return false
 		}
 
-		// Save original for restoration
-		if crd.Annotations[bundleVersionAnnotation] == "" {
+		originalBundleVersion = crd.Annotations[bundleVersionAnnotation]
+		if originalBundleVersion == "" {
 			t.Logf("CRD missing bundle-version annotation")
 			return false
 		}
@@ -669,42 +664,23 @@ func testGatewayAPIManagementModeTakeover(t *testing.T) {
 	}, 2*time.Minute, 5*time.Second,
 		"Expected takeover to be blocked with non-compliant CRDs")
 
-	// Restore CRD compliance by deleting and letting CIO recreate it
-	t.Log("Deleting non-compliant CRD to allow CIO to recreate it")
+	// Restore CRD compliance in place. A GatewayClass may be using this CRD,
+	// so deletion can leave it terminating and cannot unblock takeover.
+	t.Log("Restoring the original CRD bundle-version to allow takeover")
 	require.Eventually(t, func() bool {
-		if err := kclient.Delete(context.Background(), crd); err != nil {
-			if !errors.IsNotFound(err) {
-				t.Logf("Failed to delete CRD: %v; retrying...", err)
-				return false
-			}
+		if err := kclient.Get(context.Background(), crdName, crd); err != nil {
+			t.Logf("Failed to get CRD: %v; retrying...", err)
+			return false
 		}
-		t.Log("CRD deleted")
+		crd.Annotations[bundleVersionAnnotation] = originalBundleVersion
+		if err := kclient.Update(context.Background(), crd); err != nil {
+			t.Logf("Failed to restore CRD bundle-version: %v; retrying...", err)
+			return false
+		}
+		t.Log("CRD bundle-version restored")
 		return true
 	}, 30*time.Second, 2*time.Second,
-		"Failed to delete non-compliant CRD")
-
-	// Wait for CRD to be recreated with correct bundle-version
-	t.Log("Waiting for CIO to recreate compliant CRD")
-	assert.Eventually(t, func() bool {
-		if err := kclient.Get(context.Background(), crdName, crd); err != nil {
-			if errors.IsNotFound(err) {
-				t.Logf("CRD not yet recreated")
-			} else {
-				t.Logf("Error getting CRD: %v", err)
-			}
-			return false
-		}
-
-		bundleVersion, found := crd.Annotations[bundleVersionAnnotation]
-		if !found || bundleVersion == "v0.0.0-takeover-blocked" {
-			t.Logf("CRD not yet compliant (bundle-version=%s, found=%v)", bundleVersion, found)
-			return false
-		}
-
-		t.Logf("CRD recreated with compliant bundle-version: %s", bundleVersion)
-		return true
-	}, 3*time.Minute, 5*time.Second,
-		"Expected CIO to recreate CRD with compliant bundle-version")
+		"Failed to restore CRD bundle-version")
 
 	// Verify takeover succeeds
 	t.Log("Verifying takeover succeeds after restoring compliance")

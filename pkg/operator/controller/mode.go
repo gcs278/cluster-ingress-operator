@@ -207,14 +207,17 @@ func (m *GatewayAPIModeAccessor) GateEnabled() bool {
 	return m.gateEnabled
 }
 
-// DependentPredicate returns a predicate that passes only when
-// AllowDependents is true. Dependent controllers wire this into their
-// operational watches so events are filtered when the mode disallows
-// dependent processing.
+// DependentPredicate returns a predicate that passes create, update, and
+// generic events only when AllowDependents is true. Delete events always pass
+// so controllers can perform finalizer cleanup after the mode stops allowing
+// normal dependent processing.
 func (m *GatewayAPIModeAccessor) DependentPredicate() predicate.Predicate {
-	return predicate.NewPredicateFuncs(func(_ client.Object) bool {
-		return m.AllowDependents()
-	})
+	return predicate.Funcs{
+		CreateFunc:  func(event.CreateEvent) bool { return m.AllowDependents() },
+		UpdateFunc:  func(event.UpdateEvent) bool { return m.AllowDependents() },
+		DeleteFunc:  func(event.DeleteEvent) bool { return true },
+		GenericFunc: func(event.GenericEvent) bool { return m.AllowDependents() },
+	}
 }
 
 // Update is called by the gatewayapi reconciler to refresh the mode

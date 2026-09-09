@@ -360,12 +360,6 @@ func (r *reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		// repeating them every 30s wastes resources.
 		if modeChanged {
 			if err := r.reconcileAdmissionPolicyTransition(ctx, snapshot); err != nil {
-				if isCVOManagedAdmissionPolicy(err) {
-					// CVO still owns the VAP or binding. The Unmanaged
-					// transition cannot complete until CVO stops rendering it;
-					// retain InProgress and wait for the resource watch.
-					return reconcile.Result{}, nil
-				}
 				r.setTransitionError(modeChanged, snapshot.desiredMode, err)
 				return reconcile.Result{}, err
 			}

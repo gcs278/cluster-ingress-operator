@@ -1732,61 +1732,6 @@ func TestReconcile_SteadyStateUnmanaged_SkipsTransitionOps(t *testing.T) {
 		"steady-state reconcile must NOT set InProgress=true")
 }
 
-// TestReconcile_UnmanagedWaitsForCVOAdmissionPolicy verifies that CIO does
-// not claim an Unmanaged transition is complete while CVO still renders the
-// VAP or binding from the Default feature set.
-func TestReconcile_UnmanagedWaitsForCVOAdmissionPolicy(t *testing.T) {
-	scheme := runtime.NewScheme()
-	configv1.Install(scheme)
-	admissionregistrationv1.AddToScheme(scheme)
-	operatorv1alpha1.Install(scheme)
-
-	ingressObj := &operatorv1alpha1.Ingress{
-		ObjectMeta: metav1.ObjectMeta{Name: "cluster"},
-		Spec: operatorv1alpha1.IngressSpec{
-			GatewayAPI: operatorv1alpha1.GatewayAPIIngressConfig{
-				ManagementMode: operatorv1alpha1.GatewayAPIManagementModeUnmanaged,
-			},
-		},
-	}
-	vap := baseAdmissionPolicy.DeepCopy()
-	vap.Annotations = map[string]string{cvoFeatureSetAnnotation: "Default"}
-	binding := desiredAdmissionPolicyBinding.DeepCopy()
-	binding.Annotations = map[string]string{cvoFeatureSetAnnotation: "Default"}
-
-	fakeClient := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithRuntimeObjects(ingressObj, vap, binding).
-		Build()
-	cl := &testutil.FakeClientRecorder{
-		Client:  fakeClient,
-		T:       t,
-		Added:   []client.Object{},
-		Updated: []client.Object{},
-		Deleted: []client.Object{},
-	}
-	informer := informertest.FakeInformers{Scheme: scheme}
-	modeAccessor := operatorcontroller.NewGatewayAPIModeAccessor(true)
-	r := &reconciler{
-		client: cl,
-		cache:  &testutil.FakeCache{Informers: &informer, Reader: fakeClient},
-		config: Config{ModeAccessor: modeAccessor},
-	}
-
-	res, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "cluster"}})
-	assert.NoError(t, err)
-	assert.Equal(t, reconcile.Result{}, res)
-	assert.Empty(t, cl.Deleted, "CIO must not delete CVO-managed admission-policy resources")
-	assert.Nil(t, modeAccessor.GetLastAppliedMode(), "Unmanaged must not be recorded until CVO releases the VAP")
-	transition := modeAccessor.GetTransitionState()
-	assert.True(t, transition.InProgress)
-	assert.Equal(t, operatorv1alpha1.GatewayAPIManagementModeUnmanaged, transition.Target)
-
-	var updated operatorv1alpha1.Ingress
-	assert.NoError(t, fakeClient.Get(context.Background(), types.NamespacedName{Name: "cluster"}, &updated))
-	assert.Empty(t, updated.Status.Conditions, "terminal Unmanaged status must not be written while CVO owns the VAP")
-}
-
 // TestReconcile_RestartInSteadyStateUnmanaged_SkipsTransitionOps verifies
 // that the persisted Ingress status, rather than process-local state, prevents
 // a CIO restart from repeating an already-completed Unmanaged transition.

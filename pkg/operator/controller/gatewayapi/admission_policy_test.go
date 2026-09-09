@@ -602,6 +602,7 @@ func TestReconcile_GateOff_NoVAPOps(t *testing.T) {
 
 	var objs []runtime.Object
 	objs = append(objs, &configv1.ClusterOperator{ObjectMeta: metav1.ObjectMeta{Name: "ingress"}})
+	objs = append(objs, baseAdmissionPolicy.DeepCopy(), desiredAdmissionPolicyBinding.DeepCopy())
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -649,6 +650,14 @@ func TestReconcile_GateOff_NoVAPOps(t *testing.T) {
 			t.Fatal("VAP must NOT be deleted when gate is OFF")
 		case *admissionregistrationv1.ValidatingAdmissionPolicyBinding:
 			t.Fatal("VAPBinding must NOT be deleted when gate is OFF")
+		}
+	}
+	for _, obj := range cl.Updated {
+		switch obj.(type) {
+		case *admissionregistrationv1.ValidatingAdmissionPolicy:
+			t.Fatal("VAP must NOT be updated when gate is OFF")
+		case *admissionregistrationv1.ValidatingAdmissionPolicyBinding:
+			t.Fatal("VAPBinding must NOT be updated when gate is OFF")
 		}
 	}
 }
@@ -858,34 +867,6 @@ func TestEnsureAdmissionPolicy(t *testing.T) {
 			"updated VAP must include pod-bound validation for HA")
 	})
 
-	t.Run("does not mutate resources still managed by CVO", func(t *testing.T) {
-		existingVAP := baseAdmissionPolicy.DeepCopy()
-		existingVAP.Annotations = map[string]string{cvoFeatureSetAnnotation: "Default"}
-		existingBinding := desiredAdmissionPolicyBinding.DeepCopy()
-		existingBinding.Annotations = map[string]string{cvoFeatureSetAnnotation: "Default"}
-		infraObj := &configv1.Infrastructure{
-			ObjectMeta: metav1.ObjectMeta{Name: "cluster"},
-			Status: configv1.InfrastructureStatus{
-				ControlPlaneTopology: configv1.HighlyAvailableTopologyMode,
-			},
-		}
-		fakeClient := fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithRuntimeObjects(existingVAP, existingBinding, infraObj).
-			Build()
-		cl := &testutil.FakeClientRecorder{
-			Client:  fakeClient,
-			T:       t,
-			Added:   []client.Object{},
-			Updated: []client.Object{},
-			Deleted: []client.Object{},
-		}
-		r := &reconciler{client: cl}
-		err := r.ensureAdmissionPolicy(context.Background())
-		assert.NoError(t, err)
-		assert.Empty(t, cl.Added)
-		assert.Empty(t, cl.Updated)
-	})
 }
 
 // TestDeleteAdmissionPolicy verifies the delete path removes both VAP
@@ -928,27 +909,6 @@ func TestDeleteAdmissionPolicy(t *testing.T) {
 		assert.NoError(t, err, "must succeed when resources are already absent")
 	})
 
-	t.Run("does not delete resources still managed by CVO", func(t *testing.T) {
-		existingVAP := baseAdmissionPolicy.DeepCopy()
-		existingVAP.Annotations = map[string]string{cvoFeatureSetAnnotation: "Default"}
-		existingBinding := desiredAdmissionPolicyBinding.DeepCopy()
-		existingBinding.Annotations = map[string]string{cvoFeatureSetAnnotation: "Default"}
-		fakeClient := fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithRuntimeObjects(existingVAP, existingBinding).
-			Build()
-		cl := &testutil.FakeClientRecorder{
-			Client:  fakeClient,
-			T:       t,
-			Added:   []client.Object{},
-			Updated: []client.Object{},
-			Deleted: []client.Object{},
-		}
-		r := &reconciler{client: cl}
-		err := r.deleteAdmissionPolicy(context.Background())
-		assert.ErrorIs(t, err, errCVOManagedAdmissionPolicy)
-		assert.Empty(t, cl.Deleted)
-	})
 }
 
 // TestReconcileAdmissionPolicyTransition verifies the pre-reconcile

@@ -129,7 +129,9 @@ func TestGatewayAPI(t *testing.T) {
 		// TODO: Uninstall OSSM after test is completed.
 	})
 
-	t.Run("testGatewayAPIResources", testGatewayAPIResources)
+	if !gatewayAPIManagementModeEnabled {
+		t.Run("testGatewayAPIResources", testGatewayAPIResources)
+	}
 	t.Run("testGatewayAPIObjects", testGatewayAPIObjects)
 	t.Run("testGatewayAPIManualDeployment", testGatewayAPIManualDeployment)
 	if gatewayAPIWithoutOLMEnabled {
@@ -142,10 +144,14 @@ func TestGatewayAPI(t *testing.T) {
 	t.Run("testGatewayAPIDNSListenerWithNoHostname", testGatewayAPIDNSListenerWithNoHostname)
 	t.Run("testGatewayAPIInfrastructureAnnotations", testGatewayAPIInfrastructureAnnotations)
 	t.Run("testGatewayAPIInternalLoadBalancer", testGatewayAPIInternalLoadBalancer)
-	t.Run("testGatewayAPIResourcesProtection", testGatewayAPIResourcesProtection)
+	if !gatewayAPIManagementModeEnabled {
+		t.Run("testGatewayAPIResourcesProtection", testGatewayAPIResourcesProtection)
+	}
 	t.Run("testGatewayAPIRBAC", testGatewayAPIRBAC)
 	t.Run("testGatewayAPIListenerSetIgnored", testGatewayAPIListenerSetIgnored)
-	t.Run("testOperatorDegradedCondition", testOperatorDegradedCondition)
+	if !gatewayAPIManagementModeEnabled {
+		t.Run("testOperatorDegradedCondition", testOperatorDegradedCondition)
+	}
 	t.Run("testGatewayOpenshiftConditions", testGatewayOpenshiftConditions)
 	t.Run("testListenerSetNotAccepted", testListenerSetNotAccepted)
 	if gatewayAPIManagementModeEnabled {

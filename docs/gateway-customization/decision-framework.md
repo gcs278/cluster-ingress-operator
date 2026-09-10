@@ -25,6 +25,8 @@ flowchart TD
     O --> P[Compare complete design bundles]
 ```
 
+The GatewayClass profiles branch is discussed in the [Gateway API implementation-specific GatewayClass proposal](https://github.com/openshift/enhancements/pull/1990).
+
 ## 1. Do we need an API?
 
 **Decision: supported customization interface**

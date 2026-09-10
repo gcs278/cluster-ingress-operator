@@ -28,8 +28,10 @@ flowchart TD
 
     subgraph L4["Level 4 — Schema"]
         I[Choose schema exposure]
-        J[Typed OpenShift API]
+        J[Abstracted, typed OpenShift API]
+        K[Implementation passthrough]
         I --> J
+        I --> K
     end
 
     subgraph L5["Level 5 — Fields"]
@@ -48,6 +50,7 @@ flowchart TD
     E --> N
     H --> I
     J --> M
+    K --> N
     M --> N
 ```
 
@@ -100,10 +103,10 @@ OpenShift should read these references rather than mutate the user’s Gateway. 
 
 | Option | Tradeoff |
 | --- | --- |
-| Implementation passthrough | Flexible, but exposes Istio/generated-resource details. |
-| Typed OpenShift API | Safest and most portable, but requires fields for each supported use case. |
+| Passthrough | Flexible, but exposes Istio/generated-resource details. |
+| Abstracted, typed API | Safest and most portable, but requires fields for each supported use case. |
 
-The proposed direction is a typed OpenShift API. Users should not patch generated Istio or Kubernetes resources. New supported use cases should be added as reviewed API fields.
+The proposed direction is an abstracted, typed OpenShift API. Users should not patch generated Istio or Kubernetes resources. New supported use cases should be added as reviewed API fields.
 
 ---
 

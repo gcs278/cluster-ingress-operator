@@ -22,8 +22,10 @@ flowchart TD
 
     subgraph L3["Level 3 — Attachment"]
         G[Choose attachment and ownership]
-        H[GatewayClass.parametersRef and/or Gateway.infrastructure.parametersRef]
+        H[Standard parametersRef]
+        R[Resource Selection]
         G --> H
+        G --> R
     end
 
     subgraph L4["Level 4 — Schema"]
@@ -49,6 +51,7 @@ flowchart TD
     F --> G
     E --> N
     H --> I
+    R --> I
     J --> M
     K --> N
     M --> N
@@ -86,7 +89,15 @@ The likely answer is yes. OpenShift owns and reconciles generated Deployments, S
 
 **Decision: attachment and ownership**
 
-The cleanest model is:
+The main options are:
+
+| Option | Meaning |
+| --- | --- |
+| Standard `parametersRef` | The `GatewayClass` or `Gateway` points to the parameters object. |
+| Resource Selection | The customization object points to a `Gateway` or `GatewayClass` using a reference or selector. |
+| Name matching | A convention such as `GatewayCustomization/<GatewayClass name>` selects the target. |
+
+The standard reference model is:
 
 ```text
 GatewayClass.parametersRef       -> class-wide defaults
@@ -94,6 +105,18 @@ Gateway.infrastructure.parametersRef -> one Gateway’s configuration
 ```
 
 OpenShift should read these references rather than mutate the user’s Gateway. That avoids GitOps drift. Name matching and label-based discovery can remain implementation details if needed for Istio translation.
+
+With Resource Selection, the customization object owns the relationship:
+
+```yaml
+kind: GatewayCustomization
+spec:
+  targetRef:
+    kind: Gateway
+    name: internal
+```
+
+This can be useful when the customization must be managed by a platform namespace, but it raises cross-namespace authorization questions. Mutating the Gateway to add a generated `parametersRef` can also create GitOps drift.
 
 ---
 

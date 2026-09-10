@@ -4,57 +4,57 @@ The design should be discussed as a sequence of decisions. Each level narrows th
 
 ```mermaid
 flowchart TD
-    subgraph L1["Level 1 — Need"]
-        A[Do we need a supported customization interface?]
-        B[Change global defaults or use Istio's existing customization mechanism]
+    subgraph L1[Level 1 - Need]
+        A["Do we need a supported customization interface?"]
+        B["Change global defaults or use Istio's existing customization mechanism"]
         A -->|No| B
     end
 
-    subgraph L2["Level 2 — Extension point"]
-        C[Choose extension-point strategy]
-        D[Parameters API]
-        E[GatewayClass profiles]
-        F[Hybrid profiles plus parameters]
+    subgraph L2[Level 2 - Extension point]
+        C["Choose extension-point strategy"]
+        D["Parameters API"]
+        E["GatewayClass profiles"]
+        F["Hybrid profiles plus parameters"]
         C --> D
         C --> E
         C --> F
     end
 
-    subgraph L3["Level 3 — Attachment"]
-        G[Choose attachment and ownership]
-        H[GatewayClass parametersRef]
-        T[GatewayClass plus Gateway parametersRef]
-        R[Resource Selection<br/>(targetRef)]
+    subgraph L3[Level 3 - Attachment]
+        G["Choose attachment and ownership"]
+        H["GatewayClass parametersRef"]
+        T["GatewayClass plus Gateway parametersRef"]
+        R["Resource Selection (targetRef)"]
         G --> H
         G --> T
         G --> R
     end
 
-    subgraph L4["Level 4 — Istio injection"]
-        X[Choose how OpenShift delivers configuration to Istio]
-        X1[Gateway.infrastructure.parametersRef]
-        X2[GatewayClass.parametersRef]
-        X3[ConfigMap with defaults-for-class label]
+    subgraph L4[Level 4 - Istio injection]
+        X["Choose how OpenShift delivers configuration to Istio"]
+        X1["Gateway.infrastructure.parametersRef"]
+        X2["GatewayClass.parametersRef"]
+        X3["ConfigMap with defaults-for-class label"]
         X --> X1
         X --> X2
         X --> X3
     end
 
-    subgraph L5["Level 5 — Schema"]
-        I[Choose schema exposure]
-        J[Abstracted, typed OpenShift API]
-        K[Implementation passthrough]
+    subgraph L5[Level 5 - Schema]
+        I["Choose schema exposure"]
+        J["Abstracted, typed OpenShift API"]
+        K["Implementation passthrough"]
         I --> J
         I --> K
     end
 
-    subgraph L6["Level 6 — Fields"]
-        M[Design individual fields]
+    subgraph L6[Level 6 - Fields]
+        M["Design individual fields"]
     end
 
-    subgraph L7["Level 7 — Lifecycle"]
-        N[Define lifecycle, status, and ownership]
-        O[Compare complete design bundles]
+    subgraph L7[Level 7 - Lifecycle]
+        N["Define lifecycle, status, and ownership"]
+        O["Compare complete design bundles"]
         N --> O
     end
 

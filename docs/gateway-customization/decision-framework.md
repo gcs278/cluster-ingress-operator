@@ -30,7 +30,17 @@ flowchart TD
         G --> R
     end
 
-    subgraph L4["Level 4 — Schema"]
+    subgraph L4["Level 4 — Istio injection"]
+        X[Choose how OpenShift delivers configuration to Istio]
+        X1[Gateway.infrastructure.parametersRef]
+        X2[GatewayClass.parametersRef]
+        X3[ConfigMap with defaults-for-class label]
+        X --> X1
+        X --> X2
+        X --> X3
+    end
+
+    subgraph L5["Level 5 — Schema"]
         I[Choose schema exposure]
         J[Abstracted, typed OpenShift API]
         K[Implementation passthrough]
@@ -38,11 +48,11 @@ flowchart TD
         I --> K
     end
 
-    subgraph L5["Level 5 — Fields"]
+    subgraph L6["Level 6 — Fields"]
         M[Design individual fields]
     end
 
-    subgraph L6["Level 6 — Lifecycle"]
+    subgraph L7["Level 7 — Lifecycle"]
         N[Define lifecycle, status, and ownership]
         O[Compare complete design bundles]
         N --> O
@@ -52,9 +62,10 @@ flowchart TD
     D --> G
     F --> G
     E --> N
-    H --> I
-    T --> I
-    R --> I
+    H --> X
+    T --> X
+    R --> X
+    X --> I
     J --> M
     K --> N
     M --> N
@@ -130,7 +141,25 @@ This can be useful when the customization must be managed by a platform namespac
 
 ---
 
-## Level 4 — What kind of API is exposed?
+---
+
+## Level 4 — How does OpenShift inject configuration into Istio?
+
+This is an internal implementation decision, separate from the public attachment model.
+
+OpenShift can deliver the translated configuration to Istio through:
+
+| Istio mechanism | Use |
+| --- | --- |
+| `Gateway.spec.infrastructure.parametersRef` | Per-Gateway configuration. |
+| `GatewayClass.spec.parametersRef` | GatewayClass-level configuration, if supported by the Istio integration. |
+| ConfigMap with `gateway.istio.io/defaults-for-class` | Istio’s class-default mechanism. |
+
+The OpenShift API should hide this choice. OpenShift owns the translation and should select the appropriate Istio mechanism based on whether the configuration is class-wide or Gateway-specific.
+
+---
+
+## Level 5 — What kind of API is exposed?
 
 **Decision: schema exposure**
 
@@ -143,7 +172,7 @@ The proposed direction is an abstracted, typed OpenShift API. Users should not p
 
 ---
 
-## Level 5 — How is each field designed?
+## Level 6 — How is each field designed?
 
 For every field, record:
 
@@ -167,6 +196,6 @@ See the [field deep dives](deep-dives/external-traffic-policy.md) for examples.
 
 ---
 
-## Level 6 — What are the complete designs?
+## Level 7 — What are the complete designs?
 
 After the individual decisions, compare complete bundles in [design bundles](design-bundles.md). This keeps one design from hiding several unrelated choices.

@@ -41,7 +41,7 @@ flowchart LR
 
 ## Working hypothesis
 
-OpenShift should probably expose a typed parameters resource for common operational controls, with a carefully bounded patch or extension mechanism for fields that cannot be anticipated. The main design questions are ownership, scope, and whether a Gateway may override platform defaults.
+OpenShift should expose a typed parameters resource for supported operational controls. Generated-resource patches remain an internal implementation detail, and users configure the OpenShift API rather than Istio directly.
 
 ## References
 

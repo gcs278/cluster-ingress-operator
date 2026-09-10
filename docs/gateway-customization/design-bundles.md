@@ -31,11 +31,11 @@ Use the GatewayClass for the broad operating mode and a parameters object for su
 
 This offers the most flexibility, but requires clear precedence between profile defaults, class parameters, and Gateway parameters.
 
-## D. OpenShift wrapper around Istio patches
+## D. OpenShift translation to Istio
 
-Expose an OpenShift API, then translate it into Istio ConfigMaps and strategic merge patches.
+Expose a typed OpenShift API, then translate those fields internally into the resources Istio requires.
 
-This is a practical implementation path while keeping the public contract abstracted from Istio. It should not expose arbitrary Istio patches directly.
+This keeps the public API independent of Istio. Users do not create or edit the Istio ConfigMap directly.
 
 ## Initial direction
 
@@ -44,5 +44,4 @@ The strongest starting point is **A plus D**:
 - use standard `parametersRef` attachment;
 - expose a typed OpenShift API;
 - translate that API to Istio internally;
-- defer generic passthrough patches until a supported use case requires them.
-
+- keep generated-resource patches internal to the implementation.

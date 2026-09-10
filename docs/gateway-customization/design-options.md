@@ -60,44 +60,7 @@ spec:
 ### Costs
 
 - A new API must be versioned, supported, and integrated with the operator.
-- Some users will still need escape hatches for unusual Kubernetes fields.
-
-## Option C: typed fields plus a bounded patch
-
-Expose common fields directly and provide a restricted patch for advanced cases.
-
-```yaml
-spec:
-  deployment:
-    resources: {}
-    replicas: 3
-  service:
-    type: ClusterIP
-    externalTrafficPolicy: Cluster
-  patches:
-  - target: Deployment
-    patch: |
-      spec:
-        template:
-          spec:
-            containers:
-            - name: proxy
-              env:
-              - name: EXAMPLE
-                value: value
-```
-
-### Advantages
-
-- Common use cases remain strongly typed.
-- Less pressure to add a new field for every proxy or platform feature.
-- Similar to patterns used by Istio, Envoy Gateway, and NGINX Gateway Fabric.
-
-### Costs
-
-- Patches expose generated-resource details.
-- Validation, security, and upgrade behavior need careful limits.
-- Patches can conflict with fields controlled by the operator.
+- New supported use cases require new API fields.
 
 ## Initial recommendation
 
@@ -109,5 +72,4 @@ operator defaults
     < Gateway parameters
 ```
 
-Add a narrow patch mechanism only after identifying use cases that cannot be represented safely with typed fields.
-
+Translate the typed API to Istio internally. Do not expose the Istio ConfigMap patch mechanism to users.

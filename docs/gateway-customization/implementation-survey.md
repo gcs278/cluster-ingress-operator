@@ -6,14 +6,14 @@ This page compares how Gateway API implementations customize the infrastructure 
 
 | Implementation | Attachment | Service model | Frontend `ClusterIP` | `externalTrafficPolicy` |
 | --- | --- | --- | --- | --- |
-| Cilium | `GatewayClass.spec.parametersRef` → `CiliumGatewayClassConfig` | Narrow typed subset | No documented generated type | Typed field |
-| Istio | `Gateway.spec.infrastructure.parametersRef` → `ConfigMap` | Strategic merge patches | Via Service patch | Via Service patch |
-| kgateway | `GatewayClass.spec.parametersRef` → `GatewayParameters` | Typed proxy configuration plus patches | Typed field | Typed field |
-| Envoy Gateway | GatewayClass or Gateway `parametersRef` → `EnvoyProxy` | Typed API plus patches | Typed field | Typed field |
-| GKE | Predefined Google-managed GatewayClasses | Managed cloud load balancer | Not applicable to a proxy Service | Usually not applicable |
-| NGINX Gateway Fabric | GatewayClass or Gateway `parametersRef` → `NginxProxy` | Typed API plus patches | Typed field | Typed field |
-| Traefik | Helm/provider configuration | Existing Service, managed outside Gateway | Indirectly | Indirectly |
-| Kong Operator | `GatewayClass.spec.parametersRef` → `GatewayConfiguration` | Typed DataPlane and Service configuration | Typed field | Typed field |
+| [Cilium](https://docs.cilium.io/en/stable/network/servicemesh/gateway-api/parameterized-gatewayclass/) | `GatewayClass.spec.parametersRef` → `CiliumGatewayClassConfig` | Narrow typed subset | No documented generated type | Typed field |
+| [Istio](https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/) | `Gateway.spec.infrastructure.parametersRef` → `ConfigMap` | Strategic merge patches | Via Service patch | Via Service patch |
+| [kgateway](https://kgateway.dev/docs/envoy/latest/setup/customize/) | `GatewayClass.spec.parametersRef` → `GatewayParameters` | Typed proxy configuration plus patches | Typed field | Typed field |
+| [Envoy Gateway](https://gateway.envoyproxy.io/docs/tasks/operations/customize-envoyproxy/) | GatewayClass or Gateway `parametersRef` → `EnvoyProxy` | Typed API plus patches | Typed field | Typed field |
+| [GKE](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/gatewayclass-capabilities) | Predefined Google-managed GatewayClasses | Managed cloud load balancer | Not applicable to a proxy Service | Usually not applicable |
+| [NGINX Gateway Fabric](https://docs.nginx.com/nginx-gateway-fabric/how-to/data-plane-configuration/) | GatewayClass or Gateway `parametersRef` → `NginxProxy` | Typed API plus patches | Typed field | Typed field |
+| [Traefik](https://doc.traefik.io/traefik/reference/install-configuration/providers/kubernetes/kubernetes-gateway/) | Helm/provider configuration | Existing Service, managed outside Gateway | Indirectly | Indirectly |
+| [Kong Operator](https://docs.konghq.com/gateway-operator/latest/topologies/dbless/) | `GatewayClass.spec.parametersRef` → `GatewayConfiguration` | Typed DataPlane and Service configuration | Typed field | Typed field |
 
 ## The attachment patterns
 
@@ -63,4 +63,3 @@ Some implementations configure the proxy before the Gateway exists. Helm values,
 ## The key tradeoff
 
 Typed fields are easier to validate, document, and preserve across upgrades. Patches are more expressive, but they expose generated-resource structure and can make upgrades harder to reason about.
-

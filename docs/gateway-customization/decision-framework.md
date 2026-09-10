@@ -24,7 +24,7 @@ flowchart TD
         G[Choose attachment and ownership]
         H[GatewayClass parametersRef]
         T[GatewayClass plus Gateway parametersRef]
-        R[Resource Selection]
+        R[Resource Selection<br/>(targetRef)]
         G --> H
         G --> T
         G --> R
@@ -98,7 +98,7 @@ The main options are:
 | --- | --- |
 | GatewayClass `parametersRef` | The `GatewayClass` points to class-wide parameters. |
 | GatewayClass plus Gateway `parametersRef` | The class provides defaults and the Gateway provides per-Gateway overrides. |
-| Resource Selection | The customization object points to a `Gateway` or `GatewayClass` using a reference or selector. |
+| Resource Selection (`targetRef`) | The customization object points to a `Gateway` or `GatewayClass` using a reference or selector. |
 | Name matching | A convention such as `GatewayCustomization/<GatewayClass name>` selects the target. |
 
 The GatewayClass-only model is:

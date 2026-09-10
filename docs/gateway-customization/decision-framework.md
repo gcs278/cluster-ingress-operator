@@ -4,7 +4,7 @@ The design should be discussed as a sequence of decisions. Each level narrows th
 
 ```mermaid
 flowchart TD
-    A[Do we need a supported customization interface?] -->|No| B[Use defaults or existing platform mechanisms]
+    A[Do we need a supported customization interface?] -->|No| B[Change global defaults or use Istio's existing customization mechanism]
     A -->|Yes| C[Choose extension-point strategy]
     C -->|Parameters API| D[Use GatewayClass.parametersRef and/or Gateway.infrastructure.parametersRef]
     C -->|GatewayClass profiles| E[Offer predefined operating modes]

@@ -49,7 +49,7 @@ spec:
         externalTrafficPolicy: Local
 ```
 
-This is flexible, but makes the generated Service part of the customization contract.
+This is flexible, but makes the generated Service part of the supported customization interface.
 
 ## OpenShift questions
 
@@ -57,4 +57,3 @@ This is flexible, but makes the generated Service part of the customization cont
 - Should `Local` require an exposed readiness or health-check port?
 - Should the operator warn when `Local` is selected but proxy placement makes local endpoints unlikely?
 - Should the field be inherited from an existing OpenShift endpoint-publishing policy?
-

@@ -4,7 +4,7 @@ The design should be discussed as a sequence of decisions. Each level narrows th
 
 ```mermaid
 flowchart TD
-    A[Do we need a customization contract?] -->|No| B[Use defaults or existing platform mechanisms]
+    A[Do we need a supported customization interface?] -->|No| B[Use defaults or existing platform mechanisms]
     A -->|Yes| C[Choose extension-point strategy]
     C -->|Parameters API| D[Use GatewayClass.parametersRef and/or Gateway.infrastructure.parametersRef]
     C -->|GatewayClass profiles| E[Offer predefined operating modes]
@@ -27,7 +27,7 @@ flowchart TD
 
 ## 1. Do we need an API?
 
-**Decision: customization contract**
+**Decision: supported customization interface**
 
 The likely answer is yes. OpenShift owns and reconciles generated Deployments, Services, HPAs, and related resources. An API gives users supported fields, validation, and implementation independence.
 

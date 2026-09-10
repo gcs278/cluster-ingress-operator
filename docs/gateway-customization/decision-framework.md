@@ -4,30 +4,64 @@ The design should be discussed as a sequence of decisions. Each level narrows th
 
 ```mermaid
 flowchart TD
-    A[Do we need a supported customization interface?] -->|No| B[Change global defaults or use Istio's existing customization mechanism]
-    A -->|Yes| C[Choose extension-point strategy]
-    C -->|Parameters API| D[Use GatewayClass.parametersRef and/or Gateway.infrastructure.parametersRef]
-    C -->|GatewayClass profiles| E[Offer predefined operating modes]
-    C -->|Hybrid| F[Use profiles for broad modes and parameters for overrides]
-    D --> G[Choose attachment ownership]
+    subgraph L1["Level 1 — Need"]
+        A[Do we need a supported customization interface?]
+        B[Change global defaults or use Istio's existing customization mechanism]
+        A -->|No| B
+    end
+
+    subgraph L2["Level 2 — Extension point"]
+        C[Choose extension-point strategy]
+        D[Parameters API]
+        E[GatewayClass profiles]
+        F[Hybrid profiles plus parameters]
+        C --> D
+        C --> E
+        C --> F
+    end
+
+    subgraph L3["Level 3 — Attachment"]
+        G[Choose attachment and ownership]
+        H[GatewayClass.parametersRef and/or Gateway.infrastructure.parametersRef]
+        G --> H
+    end
+
+    subgraph L4["Level 4 — Schema"]
+        I[Choose schema exposure]
+        J[Typed OpenShift API]
+        K[Implementation-specific passthrough]
+        L[Typed fields plus bounded patches]
+        I --> J
+        I --> K
+        I --> L
+    end
+
+    subgraph L5["Level 5 — Fields"]
+        M[Design individual fields]
+    end
+
+    subgraph L6["Level 6 — Lifecycle"]
+        N[Define lifecycle, status, and ownership]
+        O[Compare complete design bundles]
+        N --> O
+    end
+
+    A -->|Yes| C
+    D --> G
     F --> G
-    E --> H[Define profile lifecycle and selection]
-    G --> I[Choose schema exposure]
-    I -->|Abstracted| J[Typed OpenShift API]
-    I -->|Passthrough| K[Implementation-specific patches]
-    I -->|Hybrid| L[Typed fields plus bounded patches]
-    J --> M[Design individual fields]
+    E --> N
+    H --> I
+    J --> M
     L --> M
-    K --> N[Resolve compatibility and safety limits]
-    M --> O[Define lifecycle, status, and ownership]
-    N --> O
-    H --> O
-    O --> P[Compare complete design bundles]
+    K --> N
+    M --> N
 ```
 
 The GatewayClass profiles branch is discussed in the [Gateway API implementation-specific GatewayClass proposal](https://github.com/openshift/enhancements/pull/1990).
 
-## 1. Do we need an API?
+---
+
+## Level 1 — Do we need a supported customization interface?
 
 **Decision: supported customization interface**
 
@@ -35,7 +69,9 @@ The likely answer is yes. OpenShift owns and reconciles generated Deployments, S
 
 `ClusterIP` and `externalTrafficPolicy` might be handled through Service-specific workarounds, but that creates unclear ownership and reconciliation behavior. They should be evaluated as API fields even if some implementations can support them indirectly.
 
-## 2. Where does customization enter Gateway API?
+---
+
+## Level 2 — Where does customization enter Gateway API?
 
 **Decision: extension-point strategy**
 
@@ -47,7 +83,9 @@ The likely answer is yes. OpenShift owns and reconciles generated Deployments, S
 
 “GatewayClass enumeration” is better described as **GatewayClass profiles**. It is a preset strategy, not a general customization API.
 
-## 3. How is the configuration attached?
+---
+
+## Level 3 — How is the configuration attached?
 
 **Decision: attachment and ownership**
 
@@ -60,7 +98,9 @@ Gateway.infrastructure.parametersRef -> one Gateway’s configuration
 
 OpenShift should read these references rather than mutate the user’s Gateway. That avoids GitOps drift. Name matching and label-based discovery can remain implementation details if needed for Istio translation.
 
-## 4. What kind of API is exposed?
+---
+
+## Level 4 — What kind of API is exposed?
 
 **Decision: schema exposure**
 
@@ -72,7 +112,9 @@ OpenShift should read these references rather than mutate the user’s Gateway. 
 
 The recommended starting point is a typed OpenShift API. Add a bounded escape hatch only for demonstrated use cases that cannot be modeled safely.
 
-## 5. How is each field designed?
+---
+
+## Level 5 — How is each field designed?
 
 For every field, record:
 
@@ -94,6 +136,8 @@ Suggested field groups:
 
 See the [field deep dives](deep-dives/external-traffic-policy.md) for examples.
 
-## 6. What are the complete designs?
+---
+
+## Level 6 — What are the complete designs?
 
 After the individual decisions, compare complete bundles in [design bundles](design-bundles.md). This keeps one design from hiding several unrelated choices.

@@ -22,9 +22,11 @@ flowchart TD
 
     subgraph L3["Level 3 — Attachment"]
         G[Choose attachment and ownership]
-        H[Standard parametersRef]
+        H[GatewayClass parametersRef]
+        T[GatewayClass plus Gateway parametersRef]
         R[Resource Selection]
         G --> H
+        G --> T
         G --> R
     end
 
@@ -51,6 +53,7 @@ flowchart TD
     F --> G
     E --> N
     H --> I
+    T --> I
     R --> I
     J --> M
     K --> N
@@ -93,15 +96,22 @@ The main options are:
 
 | Option | Meaning |
 | --- | --- |
-| Standard `parametersRef` | The `GatewayClass` or `Gateway` points to the parameters object. |
+| GatewayClass `parametersRef` | The `GatewayClass` points to class-wide parameters. |
+| GatewayClass plus Gateway `parametersRef` | The class provides defaults and the Gateway provides per-Gateway overrides. |
 | Resource Selection | The customization object points to a `Gateway` or `GatewayClass` using a reference or selector. |
 | Name matching | A convention such as `GatewayCustomization/<GatewayClass name>` selects the target. |
 
-The standard reference model is:
+The GatewayClass-only model is:
 
 ```text
-GatewayClass.parametersRef       -> class-wide defaults
-Gateway.infrastructure.parametersRef -> one Gateway’s configuration
+GatewayClass.parametersRef -> class-wide defaults
+```
+
+The two-level model is:
+
+```text
+GatewayClass.parametersRef            -> class-wide defaults
+Gateway.infrastructure.parametersRef -> one Gateway’s overrides
 ```
 
 OpenShift should read these references rather than mutate the user’s Gateway. That avoids GitOps drift. Name matching and label-based discovery can remain implementation details if needed for Istio translation.

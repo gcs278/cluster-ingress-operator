@@ -7,13 +7,15 @@ Decision markers: `[YES]` selected, `[SELECTED]` current direction, `[LIKELY]` l
 ```mermaid
 flowchart TD
     subgraph L1[Level 1 - Need]
-        A["[YES] Do we need a supported customization interface?"]
+        A["Do we need a supported customization interface?"]
+        Y["YES: add a supported customization interface"]
         B["Change global defaults or use Istio's existing customization mechanism"]
+        A -->|Yes| Y
         A -->|No| B
     end
 
     subgraph L2[Level 2 - Extension point]
-        C["[TBD] Choose extension-point strategy"]
+        C["Decision pending: choose extension-point strategy"]
         D["Parameters API"]
         E["GatewayClass profiles"]
         F["Hybrid profiles plus parameters"]
@@ -62,7 +64,7 @@ flowchart TD
         N --> O
     end
 
-    A -->|Yes| C
+    Y --> C
     D --> G
     F --> G
     E --> N
@@ -80,10 +82,10 @@ flowchart TD
     classDef no fill:#fee2e2,stroke:#dc2626,color:#991b1b
     classDef tbd fill:#f3f4f6,stroke:#6b7280,color:#374151
 
-    class A,X3 yes
+    class Y,X3 yes
     class R,M1 likely
-    class T no
-    class C,I tbd
+    class T,B no
+    class A,C,G,H,X,I,J,K,M,N,O tbd
 ```
 
 The GatewayClass profiles branch is discussed in the [Gateway API implementation-specific GatewayClass proposal](https://github.com/openshift/enhancements/pull/1990).

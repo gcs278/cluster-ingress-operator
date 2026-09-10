@@ -2,6 +2,29 @@
 
 The design should be discussed as a sequence of decisions. Each level narrows the choices below it.
 
+```mermaid
+flowchart TD
+    A[Do we need a customization contract?] -->|No| B[Use defaults or existing platform mechanisms]
+    A -->|Yes| C[Choose extension-point strategy]
+    C -->|Parameters API| D[Use GatewayClass.parametersRef and/or Gateway.infrastructure.parametersRef]
+    C -->|GatewayClass profiles| E[Offer predefined operating modes]
+    C -->|Hybrid| F[Use profiles for broad modes and parameters for overrides]
+    D --> G[Choose attachment ownership]
+    F --> G
+    E --> H[Define profile lifecycle and selection]
+    G --> I[Choose schema exposure]
+    I -->|Abstracted| J[Typed OpenShift API]
+    I -->|Passthrough| K[Implementation-specific patches]
+    I -->|Hybrid| L[Typed fields plus bounded patches]
+    J --> M[Design individual fields]
+    L --> M
+    K --> N[Resolve compatibility and safety limits]
+    M --> O[Define lifecycle, status, and ownership]
+    N --> O
+    H --> O
+    O --> P[Compare complete design bundles]
+```
+
 ## 1. Do we need an API?
 
 **Decision: customization contract**
@@ -72,4 +95,3 @@ See the [field deep dives](deep-dives/external-traffic-policy.md) for examples.
 ## 6. What are the complete designs?
 
 After the individual decisions, compare complete bundles in [design bundles](design-bundles.md). This keeps one design from hiding several unrelated choices.
-

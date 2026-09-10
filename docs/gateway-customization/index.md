@@ -19,6 +19,8 @@ This collection compares existing implementations and sketches API options for O
 | Page | Question | Status |
 | --- | --- | --- |
 | [Implementation survey](implementation-survey.md) | How do other Gateway implementations expose customization? | Draft |
+| [Decision framework](decision-framework.md) | What decisions should the team make, and in what order? | Draft |
+| [Complete design bundles](design-bundles.md) | What do the end-to-end options look like? | Draft |
 | [OpenShift design options](design-options.md) | What API shapes could OpenShift use? | Draft |
 | [Deep dive: `externalTrafficPolicy`](deep-dives/external-traffic-policy.md) | Where should source-IP and local-endpoint behavior be configured? | Draft |
 | [Deep dive: `ClusterIP`](deep-dives/cluster-ip.md) | What does “support ClusterIP” mean for a Gateway? | Draft |
@@ -44,4 +46,3 @@ OpenShift should probably expose a typed parameters resource for common operatio
 ## References
 
 The survey is based on the implementation documentation collected in [references.md](references.md).
-

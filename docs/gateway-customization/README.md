@@ -7,6 +7,8 @@ Gateway API standardizes traffic intent. Implementations still need a controlled
 ## Explore the wireframe
 
 - [Implementation survey](implementation-survey.md): how Cilium, Istio, kgateway, Envoy Gateway, GKE, NGINX Gateway Fabric, Traefik, and Kong expose customization.
+- [Decision framework](decision-framework.md): work from API necessity through attachment, schema, and field-level decisions.
+- [Complete design bundles](design-bundles.md): compare coherent end-to-end designs after the individual decisions.
 - [OpenShift design options](design-options.md): reuse `IngressController`, create a typed `GatewayParameters`, or combine typed fields with patches.
 - [Deep dive: `externalTrafficPolicy`](deep-dives/external-traffic-policy.md): source-IP preservation, local endpoints, MetalLB, and BGP/anycast.
 - [Deep dive: `ClusterIP`](deep-dives/cluster-ip.md): internal Gateway Services versus routing through backend Service VIPs.
@@ -27,4 +29,3 @@ flowchart LR
     P2 --> S
     P2 --> H
 ```
-

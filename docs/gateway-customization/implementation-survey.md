@@ -6,14 +6,16 @@ This page compares how Gateway API implementations customize the infrastructure 
 
 | Implementation | Attachment | Service model | Frontend `ClusterIP` | `externalTrafficPolicy` |
 | --- | --- | --- | --- | --- |
-| [Cilium](https://docs.cilium.io/en/stable/network/servicemesh/gateway-api/parameterized-gatewayclass/) | `GatewayClass.spec.parametersRef` → `CiliumGatewayClassConfig` | Narrow typed subset | No documented generated type | Typed field |
-| [Istio](https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/) | `Gateway.spec.infrastructure.parametersRef` → `ConfigMap` | Strategic merge patches | Via Service patch | Via Service patch |
-| [kgateway](https://kgateway.dev/docs/envoy/latest/setup/customize/) | `GatewayClass.spec.parametersRef` → `GatewayParameters` | Typed proxy configuration plus patches | Typed field | Typed field |
-| [Envoy Gateway](https://gateway.envoyproxy.io/docs/tasks/operations/customize-envoyproxy/) | GatewayClass or Gateway `parametersRef` → `EnvoyProxy` | Typed API plus patches | Typed field | Typed field |
+| [Cilium](https://docs.cilium.io/en/stable/network/servicemesh/gateway-api/parameterized-gatewayclass/) | `GatewayClass.spec.parametersRef` → `CiliumGatewayClassConfig` | Narrow typed subset | Unsupported by `spec.service.type` (only `LoadBalancer`/`NodePort`) | `spec.service.externalTrafficPolicy` |
+| [Istio](https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/) | `Gateway.spec.infrastructure.parametersRef` → `ConfigMap` | Strategic merge patches | `service.spec.type` in the ConfigMap patch | `service.spec.externalTrafficPolicy` in the ConfigMap patch |
+| [kgateway](https://kgateway.dev/docs/envoy/latest/setup/customize/) | `GatewayClass.spec.parametersRef` → `GatewayParameters` | Typed proxy configuration plus patches | `spec.kube.service.type` | `spec.kube.service.externalTrafficPolicy` |
+| [Envoy Gateway](https://gateway.envoyproxy.io/docs/tasks/operations/customize-envoyproxy/) | GatewayClass or Gateway `parametersRef` → `EnvoyProxy` | Typed API plus patches | `spec.provider.kubernetes.envoyService.type` | `spec.provider.kubernetes.envoyService.externalTrafficPolicy` |
 | [GKE](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/gatewayclass-capabilities) | Predefined Google-managed GatewayClasses | Managed cloud load balancer | Not applicable to a proxy Service | Usually not applicable |
-| [NGINX Gateway Fabric](https://docs.nginx.com/nginx-gateway-fabric/how-to/data-plane-configuration/) | GatewayClass or Gateway `parametersRef` → `NginxProxy` | Typed API plus patches | Typed field | Typed field |
+| [NGINX Gateway Fabric](https://docs.nginx.com/nginx-gateway-fabric/how-to/data-plane-configuration/) | GatewayClass or Gateway `parametersRef` → `NginxProxy` | Typed API plus patches | `spec.kubernetes.service.type` | `spec.kubernetes.service.externalTrafficPolicy` |
 | [Traefik](https://doc.traefik.io/traefik/reference/install-configuration/providers/kubernetes/kubernetes-gateway/) | Helm/provider configuration | Existing Service, managed outside Gateway | Indirectly | Indirectly |
-| [Kong Operator](https://docs.konghq.com/gateway-operator/latest/topologies/dbless/) | `GatewayClass.spec.parametersRef` → `GatewayConfiguration` | Typed DataPlane and Service configuration | Typed field | Typed field |
+| [Kong Operator](https://docs.konghq.com/gateway-operator/latest/topologies/dbless/) | `GatewayClass.spec.parametersRef` → `GatewayConfiguration` | Typed DataPlane and Service configuration | `spec.dataplaneOptions.network.services.ingress.type` | `spec.dataplaneOptions.network.services.ingress.externalTrafficPolicy` |
+
+Field paths are relative to the referenced implementation-specific parameters object unless the row explicitly says that the value is a patch. They are not fields on the standard `Gateway` object itself.
 
 ## The attachment patterns
 

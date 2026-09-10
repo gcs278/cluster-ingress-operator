@@ -2,16 +2,18 @@
 
 The design should be discussed as a sequence of decisions. Each level narrows the choices below it.
 
+Decision markers: `[YES]` selected, `[SELECTED]` current direction, `[LIKELY]` leaning, `[LIKELY NO]` leaning away, and `[TBD]` undecided.
+
 ```mermaid
 flowchart TD
     subgraph L1[Level 1 - Need]
-        A["Do we need a supported customization interface?"]
+        A["[YES] Do we need a supported customization interface?"]
         B["Change global defaults or use Istio's existing customization mechanism"]
         A -->|No| B
     end
 
     subgraph L2[Level 2 - Extension point]
-        C["Choose extension-point strategy"]
+        C["[TBD] Choose extension-point strategy"]
         D["Parameters API"]
         E["GatewayClass profiles"]
         F["Hybrid profiles plus parameters"]
@@ -23,25 +25,27 @@ flowchart TD
     subgraph L3[Level 3 - Attachment]
         G["Choose attachment and ownership"]
         H["GatewayClass parametersRef"]
-        T["GatewayClass plus Gateway parametersRef"]
+        T["[LIKELY NO] GatewayClass plus Gateway parametersRef"]
         R["Resource Selection (targetRef)"]
+        M1["[LIKELY] Matching names"]
         G --> H
         G --> T
         G --> R
+        G --> M1
     end
 
     subgraph L4[Level 4 - Istio injection]
         X["Choose how OpenShift delivers configuration to Istio"]
         X1["Gateway.infrastructure.parametersRef"]
         X2["GatewayClass.parametersRef"]
-        X3["ConfigMap with defaults-for-class label"]
+        X3["[SELECTED] ConfigMap with defaults-for-class label"]
         X --> X1
         X --> X2
         X --> X3
     end
 
     subgraph L5[Level 5 - Schema]
-        I["Choose schema exposure"]
+        I["[TBD] Choose schema exposure"]
         J["Abstracted, typed OpenShift API"]
         K["Implementation passthrough"]
         I --> J
@@ -65,10 +69,21 @@ flowchart TD
     H --> X
     T --> X
     R --> X
+    M1 --> X
     X --> I
     J --> M
     K --> N
     M --> N
+
+    classDef yes fill:#dcfce7,stroke:#16a34a,color:#166534
+    classDef likely fill:#fef9c3,stroke:#ca8a04,color:#854d0e
+    classDef no fill:#fee2e2,stroke:#dc2626,color:#991b1b
+    classDef tbd fill:#f3f4f6,stroke:#6b7280,color:#374151
+
+    class A,X3 yes
+    class R,M1 likely
+    class T no
+    class C,I tbd
 ```
 
 The GatewayClass profiles branch is discussed in the [Gateway API implementation-specific GatewayClass proposal](https://github.com/openshift/enhancements/pull/1990).
@@ -95,6 +110,8 @@ The likely answer is yes. OpenShift owns and reconciles generated Deployments, S
 | GatewayClass profiles | Offer predefined classes such as internal, external, or high-availability. |
 | Hybrid | Use profiles for broad operating modes and parameters for supported overrides. |
 
+**Status: TBD.**
+
 “GatewayClass enumeration” is better described as **GatewayClass profiles**. It is a preset strategy, not a general customization API.
 
 ---
@@ -108,9 +125,11 @@ The main options are:
 | Option | Meaning |
 | --- | --- |
 | GatewayClass `parametersRef` | The `GatewayClass` points to class-wide parameters. |
-| GatewayClass plus Gateway `parametersRef` | The class provides defaults and the Gateway provides per-Gateway overrides. |
+| GatewayClass plus Gateway `parametersRef` | The class provides defaults and the Gateway provides per-Gateway overrides. **Likely not selected.** |
 | Resource Selection (`targetRef`) | The customization object points to a `Gateway` or `GatewayClass` using a reference or selector. |
-| Name matching | A convention such as `GatewayCustomization/<GatewayClass name>` selects the target. |
+| Matching names | A convention such as `GatewayCustomization/<GatewayClass name>` selects the target. **Likely.** |
+
+**Status: Resource Selection and Matching Names are the current alternatives.**
 
 The GatewayClass-only model is:
 
@@ -153,9 +172,9 @@ OpenShift can deliver the translated configuration to Istio through:
 | --- | --- |
 | `Gateway.spec.infrastructure.parametersRef` | Per-Gateway configuration. |
 | `GatewayClass.spec.parametersRef` | GatewayClass-level configuration, if supported by the Istio integration. |
-| ConfigMap with `gateway.istio.io/defaults-for-class` | Istio’s class-default mechanism. |
+| ConfigMap with `gateway.istio.io/defaults-for-class` | Istio’s class-default mechanism. **Selected direction.** |
 
-The OpenShift API should hide this choice. OpenShift owns the translation and should select the appropriate Istio mechanism based on whether the configuration is class-wide or Gateway-specific.
+The OpenShift API should hide this choice. The current direction is for OpenShift to create or update the class-default ConfigMap and apply the `gateway.istio.io/defaults-for-class` label.
 
 ---
 
@@ -168,7 +187,7 @@ The OpenShift API should hide this choice. OpenShift owns the translation and sh
 | Passthrough | Flexible, but exposes Istio/generated-resource details. |
 | Abstracted, typed API | Safest and most portable, but requires fields for each supported use case. |
 
-The proposed direction is an abstracted, typed OpenShift API. Users should not patch generated Istio or Kubernetes resources. New supported use cases should be added as reviewed API fields.
+**Status: TBD.** The main choice is still between an abstracted, typed OpenShift API and exposing implementation details. The current constraints favor an abstracted API; users should not patch generated Istio or Kubernetes resources.
 
 ---
 

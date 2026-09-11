@@ -68,7 +68,9 @@ sed -i -e '/MaxTimeToConsistency:/ s/30/360/' conformance/utils/config/timeout.g
 #   GatewayFrontendClientCertificateValidationInsecureFallback, GatewayHTTPSListenerDetectMisdirectedRequests:
 #   not supported by Istio 1.30.1 (https://github.com/istio/istio/blob/1.30.1/pilot/pkg/config/kube/gateway/supported_features.go#L22).
 SUPPORTED_FEATURES="BackendTLSPolicy,BackendTLSPolicySANValidation,Gateway,GatewayAddressEmpty,GatewayHTTPListenerIsolation,GatewayInfrastructurePropagation,GatewayPort8080,GRPCRoute,HTTPRoute,HTTPRoute303RedirectStatusCode,HTTPRoute307RedirectStatusCode,HTTPRoute308RedirectStatusCode,HTTPRouteBackendProtocolH2C,HTTPRouteBackendProtocolWebSocket,HTTPRouteBackendRequestHeaderModification,HTTPRouteBackendTimeout,HTTPRouteCORS,HTTPRouteDestinationPortMatching,HTTPRouteHostRewrite,HTTPRouteMethodMatching,HTTPRouteNamedRouteRule,HTTPRouteParentRefPort,HTTPRoutePathRedirect,HTTPRoutePathRewrite,HTTPRoutePortRedirect,HTTPRouteQueryParamMatching,HTTPRouteRequestMirror,HTTPRouteRequestMultipleMirrors,HTTPRouteRequestPercentageMirror,HTTPRouteRequestTimeout,HTTPRouteResponseHeaderModification,HTTPRouteSchemeRedirect,ListenerSet,ReferenceGrant,TLSRoute,TLSRouteModeMixed,TLSRouteModeTerminate"
-SKIPPED_TESTS=""
+# Istio 1.30 advertises ListenerSet but does not implement the
+# ListenerSetReferenceGrant conformance case yet.
+SKIPPED_TESTS="ListenerSetReferenceGrant"
 
 echo "Start Gateway API Conformance Testing"
 go test ./conformance -v -timeout 60m -run TestConformance -args "--gateway-class=conformance" "--report-output=openshift.yaml" "--organization=Red Hat" "--project=Openshift Service Mesh" "--version=3.4.0" "--url=https://www.redhat.com/en/technologies/cloud-computing/openshift/container-platform" "--conformance-profiles=GATEWAY-HTTP,GATEWAY-GRPC,GATEWAY-TLS" "--supported-features=${SUPPORTED_FEATURES}" "--skip-tests=${SKIPPED_TESTS}"

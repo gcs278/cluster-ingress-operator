@@ -137,7 +137,6 @@ func New(config operatorconfig.Config, kubeConfig *rest.Config) (*Operator, erro
 	if err != nil {
 		return nil, err
 	}
-	azureWorkloadIdentityEnabled := featureGates.Enabled(features.FeatureGateAzureWorkloadIdentity)
 	gatewayAPIWithoutOLMEnabled := featureGates.Enabled(features.FeatureGateGatewayAPIWithoutOLM)
 	ingressControllerDCMEnabled := featureGates.Enabled(features.FeatureGateIngressControllerDynamicConfigurationManager)
 	featureMultiHAProxyEnabled := featureGates.Enabled(features.FeatureGateIngressControllerMultipleHAProxyVersions)
@@ -281,8 +280,7 @@ func New(config operatorconfig.Config, kubeConfig *rest.Config) (*Operator, erro
 			config.Namespace,
 			operatorcontroller.DefaultOperandNamespace,
 		},
-		OperatorReleaseVersion:       config.OperatorReleaseVersion,
-		AzureWorkloadIdentityEnabled: azureWorkloadIdentityEnabled,
+		OperatorReleaseVersion: config.OperatorReleaseVersion,
 	}); err != nil {
 		return nil, fmt.Errorf("failed to create dns controller: %v", err)
 	}
